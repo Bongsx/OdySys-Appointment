@@ -7,12 +7,16 @@ import PatientBooking from "./assets/components/PatientBooking";
 import LaboratoryExams from "./assets/components/LaboratoryExams";
 import AdminLabAppointments from "./assets/components/AdminLab";
 import Booking from "./assets/components/AdminConsult";
+import Signup from "./assets/components/SignUp";
+import ForgotPassword from "./assets/components/ForgotPassowrd";
 
 function App() {
   return (
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/Signup" element={<Signup />} />
+        <Route path="/ForgotPassword" element={<ForgotPassword />} />
 
         <Route
           path="/"

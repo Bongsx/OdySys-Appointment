@@ -34,16 +34,21 @@ function PatientBooking() {
     patientLastName: "",
     email: "",
     phone: "+63",
+    dateOfBirth: "",
+    bloodType: "",
     address: "",
     patientComplaint: [""],
     doctor: "",
     appointmentDate: "",
     appointmentTime: "",
     clinicName: "",
+    clinicId: "", // Added clinic ID field
     type: "",
+    emergencyContact: { name: "", phone: "", relation: "" },
   });
 
   const [doctorList, setDoctorList] = useState([]);
+  const [clinicList, setClinicList] = useState([]); // Added clinic list state
   const [medicalServices, setMedicalServices] = useState([]);
   const [bookedDates, setBookedDates] = useState([]);
   const [bookedTimes, setBookedTimes] = useState([]);
@@ -61,6 +66,7 @@ function PatientBooking() {
     appointmentDate: true,
     appointmentTime: true,
     clinicName: true,
+    clinicId: true, // Added clinic ID validation
     type: true,
   });
   const [selectedDay, setSelectedDay] = useState(null);
@@ -92,14 +98,28 @@ function PatientBooking() {
 
   useEffect(() => {
     const docRef = ref(database, "doctors");
+    const clinicsRef = ref(database, "clinics"); // Added clinics reference
     const patRef = ref(database, `appointments/consultations`);
     const servicesRef = ref(database, "medicalServices/consultationTypes");
 
+    // Fetch doctors
     onValue(docRef, (snap) => {
       const data = snap.val();
       if (data) {
         const list = Object.values(data);
         setDoctorList(list);
+      }
+    });
+
+    // Fetch clinics with their IDs
+    onValue(clinicsRef, (snap) => {
+      const data = snap.val();
+      if (data) {
+        const clinics = Object.entries(data).map(([id, clinic]) => ({
+          id,
+          ...clinic,
+        }));
+        setClinicList(clinics);
       }
     });
 
@@ -173,6 +193,7 @@ function PatientBooking() {
     if (name === "doctor") return value && value.trim() !== "" ? null : true;
     if (name === "clinicName")
       return value && value.trim() !== "" ? null : true;
+    if (name === "clinicId") return value && value.trim() !== "" ? null : true;
     if (name === "type") return value && value.trim() !== "" ? null : true;
 
     return value.trim() ? null : true;
@@ -243,6 +264,13 @@ function PatientBooking() {
         minute: "2-digit",
       })}`;
 
+      const lastUpdated = `${
+        new Date().toISOString().split("T")[0]
+      }, ${new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`;
+
       const appointmentData = {
         patient: {
           patientFirstName: form.patientFirstName,
@@ -250,16 +278,17 @@ function PatientBooking() {
           email: form.email,
           phone: form.phone,
           address: form.address,
-          patientComplaint: form.patientComplaint.filter(
-            (c) => c.trim() !== ""
-          ),
+          complaints: form.patientComplaint.filter((c) => c.trim() !== ""),
         },
         doctor: form.doctor,
         appointmentDate: form.appointmentDate,
         appointmentTime: form.appointmentTime,
         clinicName: form.clinicName,
+        clinicId: form.clinicId,
         type: form.type,
+        status: "Pending",
         createdAt: createdAt,
+        lastUpdated: lastUpdated,
       };
 
       console.log("Saving appointment data:", appointmentData);
@@ -300,6 +329,7 @@ function PatientBooking() {
         appointmentDate: "",
         appointmentTime: "",
         clinicName: "",
+        clinicId: "", // Reset clinic ID
         type: "",
       });
       setSelectedDay(null);
@@ -315,6 +345,7 @@ function PatientBooking() {
         appointmentDate: true,
         appointmentTime: true,
         clinicName: true,
+        clinicId: true, // Reset clinic ID error
         type: true,
       });
       navigate("/login");
@@ -389,6 +420,15 @@ function PatientBooking() {
       >
         {initials}
       </div>
+    );
+  };
+
+  // Helper function to get available clinics for the selected doctor
+  const getAvailableClinics = () => {
+    if (!selectedDoctor || !selectedDoctor.clinicAffiliations) return [];
+
+    return clinicList.filter((clinic) =>
+      selectedDoctor.clinicAffiliations.includes(clinic.name)
     );
   };
 
@@ -674,21 +714,44 @@ function PatientBooking() {
               value={form.doctor}
               onChange={(e) => {
                 const doctor = e.target.value;
-                setForm((p) => ({ ...p, doctor }));
+                setForm((p) => ({
+                  ...p,
+                  doctor,
+                  clinicName: "", // Reset clinic selection when doctor changes
+                  clinicId: "", // Reset clinic ID when doctor changes
+                }));
                 const err = validateField("doctor", doctor);
-                setErrors((prev) => ({ ...prev, doctor: err }));
+                setErrors((prev) => ({
+                  ...prev,
+                  doctor: err,
+                  clinicName: true, // Reset clinic validation
+                  clinicId: true, // Reset clinic ID validation
+                }));
 
                 const doc = doctorList.find((d) => d.fullName === doctor);
                 setSelectedDoctor(doc || null);
 
+                // Auto-select clinic if doctor has only one clinic affiliation
                 if (doc?.clinicAffiliations?.length === 1) {
-                  const clinic = doc.clinicAffiliations[0];
-                  setForm((p) => ({ ...p, clinicName: clinic }));
-                  const clinicErr = validateField("clinicName", clinic);
-                  setErrors((prev) => ({ ...prev, clinicName: clinicErr }));
-                } else {
-                  setForm((p) => ({ ...p, clinicName: "" }));
-                  setErrors((prev) => ({ ...prev, clinicName: true }));
+                  const clinicName = doc.clinicAffiliations[0];
+                  const clinic = clinicList.find((c) => c.name === clinicName);
+
+                  setForm((p) => ({
+                    ...p,
+                    clinicName: clinicName,
+                    clinicId: clinic?.id || "",
+                  }));
+
+                  const clinicErr = validateField("clinicName", clinicName);
+                  const clinicIdErr = validateField(
+                    "clinicId",
+                    clinic?.id || ""
+                  );
+                  setErrors((prev) => ({
+                    ...prev,
+                    clinicName: clinicErr,
+                    clinicId: clinicIdErr,
+                  }));
                 }
               }}
               className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500 text-center mb-6"
@@ -724,18 +787,34 @@ function PatientBooking() {
                   value={form.clinicName}
                   onChange={(e) => {
                     const clinicName = e.target.value;
-                    setForm((p) => ({ ...p, clinicName }));
-                    const err = validateField("clinicName", clinicName);
-                    setErrors((prev) => ({ ...prev, clinicName: err }));
+                    const selectedClinic = clinicList.find(
+                      (clinic) => clinic.name === clinicName
+                    );
+
+                    setForm((p) => ({
+                      ...p,
+                      clinicName,
+                      clinicId: selectedClinic?.id || "",
+                    }));
+
+                    const clinicErr = validateField("clinicName", clinicName);
+                    const clinicIdErr = validateField(
+                      "clinicId",
+                      selectedClinic?.id || ""
+                    );
+                    setErrors((prev) => ({
+                      ...prev,
+                      clinicName: clinicErr,
+                      clinicId: clinicIdErr,
+                    }));
                   }}
                   className="w-full p-3 rounded-lg border-2 border-gray-300 focus:border-purple-500 focus:outline-none mb-4"
                 >
                   <option value="">-- Select Clinic --</option>
-                  {selectedDoctor.clinicAffiliations.map((clinic, idx) => (
-                    <option key={idx} value={clinic}>
-                      {clinic}{" "}
-                      {selectedDoctor.addressLine &&
-                        `- ${selectedDoctor.addressLine}`}
+                  {getAvailableClinics().map((clinic, idx) => (
+                    <option key={idx} value={clinic.name}>
+                      {clinic.name}
+                      {clinic.address && ` - ${clinic.address}`}
                     </option>
                   ))}
                 </select>

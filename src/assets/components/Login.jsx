@@ -135,6 +135,7 @@ function Login() {
             <div className="text-right">
               <button
                 type="button"
+                onClick={() => navigate("/ForgotPassword")}
                 className="text-sm text-indigo-600 hover:text-indigo-500 font-medium transition-colors"
               >
                 Forgot password?
@@ -164,6 +165,7 @@ function Login() {
               Don't have an account?{" "}
               <button
                 type="button"
+                onClick={() => navigate("/signup")}
                 className="text-indigo-600 hover:text-indigo-500 font-medium transition-colors"
               >
                 Sign up

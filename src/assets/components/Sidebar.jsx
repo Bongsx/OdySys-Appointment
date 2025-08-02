@@ -16,7 +16,7 @@ function Sidebar() {
     // Clear user data from localStorage
     localStorage.removeItem("user");
     // Navigate to login page
-    navigate("/");
+    navigate("/login");
   };
 
   const navItems = [
