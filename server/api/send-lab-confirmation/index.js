@@ -54,7 +54,7 @@ const generateAppointmentEmail = ({
             <td style="padding: 10px; border: 1px solid #ccc;">${addressLine}</td>
           </tr>
           <tr>
-            <td style="padding: 10px; border: 1px solid #ccc;"><strong>🔢 Slot Number:</strong></td>
+            <td style="padding: 10px; border: 1px solid #ccc;"><strong>🔢 Ticket Slot Number:</strong></td>
             <td style="padding: 10px; border: 1px solid #ccc;">${slotNumber}</td>
           </tr>
           <tr>

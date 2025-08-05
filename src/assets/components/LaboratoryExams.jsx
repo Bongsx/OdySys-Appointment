@@ -3,6 +3,8 @@ import React from "react";
 import { ref, push, set, onValue } from "firebase/database";
 import { database } from "../firebase/firebase";
 import { useNavigate } from "react-router-dom";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth } from "../firebase/firebase";
 import {
   CheckCircle,
   AlertCircle,
@@ -20,12 +22,13 @@ import {
   Calendar,
   Droplet,
   UserCheck,
+  DollarSign,
 } from "lucide-react";
 
 function LaboratoryExams() {
   const navigate = useNavigate();
   const slotRef = useRef(null);
-  const newRef = push(ref(database, `appointments/laboratory`));
+  const newRef = push(ref(database, "clinicLabRequests"));
 
   const [form, setForm] = useState({
     labTestName: "",
@@ -61,6 +64,7 @@ function LaboratoryExams() {
   const [state, setState] = useState({
     examTypes: [],
     selectedDescription: "",
+    selectedServiceFee: null,
     clinics: [],
     selectedClinicInfo: null,
     doctors: [],
@@ -70,6 +74,7 @@ function LaboratoryExams() {
     submitting: false,
     loading: false,
     currentPage: 0,
+    currentUser: null,
     errors: {
       patientName: true,
       email: true,
@@ -100,6 +105,87 @@ function LaboratoryExams() {
     "Other",
   ];
 
+  // Generate time slots with ranges
+  const generateTimeSlots = () => {
+    const slots = [];
+    const startHour = 8; // 8:00 AM
+    const endHour = 18; // 6:00 PM (last slot starts at 5:00 PM)
+
+    for (let hour = startHour; hour < endHour; hour++) {
+      const startTime = hour <= 12 ? `${hour}:00AM` : `${hour - 12}:00PM`;
+      const endTime =
+        hour + 1 <= 12 ? `${hour + 1}:00AM` : `${hour + 1 - 12}:00PM`;
+
+      // Handle 12 PM case
+      const displayStartTime = hour === 12 ? "12:00PM" : startTime;
+      const displayEndTime = hour + 1 === 12 ? "12:00PM" : endTime;
+
+      // Create 10 slots per hour
+      for (let slot = 1; slot <= 10; slot++) {
+        const slotNumber = (hour - startHour) * 10 + slot;
+        slots.push({
+          number: slotNumber,
+          display: `Slot ${slotNumber}`,
+          timeRange: `${displayStartTime} - ${displayEndTime}`,
+          fullDisplay: `Slot ${slotNumber} (${displayStartTime} - ${displayEndTime})`,
+        });
+      }
+    }
+
+    return slots;
+  };
+
+  const timeSlots = generateTimeSlots();
+
+  // Auth state listener and user data fetching
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // Fetch user data from Firebase
+        const userRef = ref(database, `users/${user.uid}`);
+        onValue(userRef, (snapshot) => {
+          const userData = snapshot.val();
+          if (userData) {
+            setState((prev) => ({ ...prev, currentUser: userData }));
+
+            // Populate form fields with user data
+            const fullName =
+              userData.fullName ||
+              userData.firstName + " " + userData.lastName ||
+              "";
+            const email = userData.email || user.email || "";
+            const contactNumber =
+              userData.contactNumber || userData.phoneNumber || "";
+
+            setForm((prev) => ({
+              ...prev,
+              patientName: fullName,
+              email: email,
+              contactNumber: contactNumber,
+              userId: user.uid,
+            }));
+
+            // Update validation errors for pre-filled fields
+            setState((prev) => ({
+              ...prev,
+              errors: {
+                ...prev.errors,
+                patientName: validateField("patientName", fullName),
+                email: validateField("email", email),
+                contactNumber: validateField("contactNumber", contactNumber),
+              },
+            }));
+          }
+        });
+      } else {
+        // User not authenticated, redirect to login
+        navigate("/login");
+      }
+    });
+
+    return () => unsubscribe();
+  }, [navigate]);
+
   // Fetch data
   useEffect(() => {
     const types = [];
@@ -111,6 +197,7 @@ function LaboratoryExams() {
             id: key,
             name: e.name,
             description: e.description,
+            serviceFee: e.serviceFee || e.fee || e.price || null, // Multiple possible field names
           }));
           setState((prev) => ({
             ...prev,
@@ -156,16 +243,17 @@ function LaboratoryExams() {
     });
   }, []);
 
-  // Fetch appointments
+  // Fetch appointments - now includes clinic filter
   useEffect(() => {
-    onValue(ref(database, `appointments/laboratory`), (snap) => {
+    onValue(ref(database, `clinicLabRequests`), (snap) => {
       const data = snap.val();
       if (data) {
         const all = Object.values(data);
         const todaysAppointments = all.filter(
           (a) =>
             a.createdAt?.date === form.createdAt.date &&
-            a.labTestName === form.labTestName
+            a.labTestName === form.labTestName &&
+            a.clinic === form.clinic // Filter by clinic
         );
         setState((prev) => ({
           ...prev,
@@ -176,7 +264,7 @@ function LaboratoryExams() {
         setState((prev) => ({ ...prev, appointments: [], bookedSlots: [] }));
       }
     });
-  }, [form.createdAt.date, form.labTestName]);
+  }, [form.createdAt.date, form.labTestName, form.clinic]); // Added form.clinic dependency
 
   const validateField = (name, value) => {
     const required = [
@@ -240,7 +328,7 @@ function LaboratoryExams() {
         ...prev,
         [name]: value,
         labTestId: selectedTest?.id || "",
-        slotNumber: "",
+        slotNumber: "", // Reset slot when test changes
       }));
       setState((prev) => ({
         ...prev,
@@ -345,6 +433,12 @@ function LaboratoryExams() {
   };
 
   const getEstimatedTime = (slotNumber) => {
+    const slot = timeSlots.find((s) => s.number === parseInt(slotNumber));
+    if (slot) {
+      return slot.timeRange;
+    }
+
+    // Fallback to old calculation if slot not found
     const sorted = state.appointments
       .filter((a) => parseInt(a.slotNumber) < parseInt(slotNumber))
       .sort((a, b) => parseInt(a.slotNumber) - parseInt(b.slotNumber));
@@ -369,32 +463,30 @@ function LaboratoryExams() {
       const description =
         state.selectedDescription || "No description provided";
       const nameParts = form.patientName.trim().split(" ");
-      const patientFirstName =
+      const firstName =
         nameParts.length === 1
           ? nameParts[0]
           : nameParts.slice(0, -1).join(" ");
-      const patientLastName =
+      const lastName =
         nameParts.length === 1 ? "" : nameParts[nameParts.length - 1];
 
       const dataToPush = {
         ...form,
         estimatedTime,
         description,
-        patientFirstName,
-        patientLastName,
+        firstName,
+        lastName,
         status: "Pending",
         addressLine: state.selectedClinicInfo?.addressLine || "",
         type: state.selectedClinicInfo?.type || "",
         clinicId: state.selectedClinicInfo?.id || "",
+        serviceFee: state.selectedServiceFee, // Add service fee to the data
         patientComplaint: form.patientComplaint.filter(
           (complaint) => complaint.trim() !== ""
         ),
       };
 
-      await set(
-        ref(database, `appointments/laboratory/${newRef.key}`),
-        dataToPush
-      );
+      await set(ref(database, `clinicLabRequests/${newRef.key}`), dataToPush);
 
       await fetch("http://localhost:5000/api/send-lab-confirmation", {
         method: "POST",
@@ -411,6 +503,7 @@ function LaboratoryExams() {
           referDoctor: form.referDoctor,
           clinic: form.clinic,
           addressLine: state.selectedClinicInfo?.addressLine || "",
+          serviceFee: state.selectedServiceFee, // Include service fee in email
           emergencyContact: form.emergencyContact,
           patientComplaint: form.patientComplaint.filter(
             (complaint) => complaint.trim() !== ""
@@ -420,17 +513,26 @@ function LaboratoryExams() {
 
       alert("✅ Booking saved successfully!");
 
-      // Reset form
+      // Reset form but keep user data
+      const userData = state.currentUser;
+      const fullName =
+        userData?.fullName ||
+        userData?.firstName + " " + userData?.lastName ||
+        "";
+      const email = userData?.email || "";
+      const contactNumber =
+        userData?.contactNumber || userData?.phoneNumber || "";
+
       setForm({
         labTestName: "",
         labTestId: "",
-        patientName: "",
-        email: "",
-        contactNumber: "",
+        patientName: fullName,
+        email: email,
+        contactNumber: contactNumber,
         dateOfBirth: "",
         bloodType: "",
         referDoctor: "",
-        userId: "",
+        userId: form.userId,
         slotNumber: "",
         notes: "",
         clinic: "",
@@ -450,10 +552,11 @@ function LaboratoryExams() {
 
       setState((prev) => ({
         ...prev,
+        selectedServiceFee: null, // Reset service fee
         errors: {
-          patientName: true,
-          email: true,
-          contactNumber: true,
+          patientName: validateField("patientName", fullName),
+          email: validateField("email", email),
+          contactNumber: validateField("contactNumber", contactNumber),
           dateOfBirth: true,
           bloodType: true,
           labTestName: true,
@@ -468,7 +571,7 @@ function LaboratoryExams() {
         selectedClinicInfo: null,
       }));
 
-      navigate("/login");
+      navigate("/");
     } catch (error) {
       alert("❌ " + error.message);
     }
@@ -522,24 +625,28 @@ function LaboratoryExams() {
   );
 
   const renderSlots = () => {
-    const start = state.currentPage * 50 + 1;
-    return Array.from({ length: 50 }, (_, i) => {
-      const slot = String(start + i).padStart(3, "0");
-      const isBooked = state.bookedSlots.includes(slot);
-      const isSelected = form.slotNumber === slot;
+    const slotsPerPage = 20; // Reduced from 50 to show more detail
+    const start = state.currentPage * slotsPerPage;
+    const end = start + slotsPerPage;
+    const currentSlots = timeSlots.slice(start, end);
+
+    return currentSlots.map((slot) => {
+      const isBooked = state.bookedSlots.includes(slot.number.toString());
+      const isSelected = form.slotNumber === slot.number.toString();
+
       return (
         <div
-          key={slot}
+          key={slot.number}
           onClick={() => {
             if (!isBooked) {
-              setForm((f) => ({ ...f, slotNumber: slot }));
+              setForm((f) => ({ ...f, slotNumber: slot.number.toString() }));
               setState((prev) => ({
                 ...prev,
                 errors: { ...prev.errors, slotNumber: null },
               }));
             }
           }}
-          className={`rounded-lg w-12 h-12 flex items-center justify-center text-sm font-semibold cursor-pointer transition-all transform hover:scale-105 shadow-sm ${
+          className={`rounded-lg p-3 text-center cursor-pointer transition-all transform hover:scale-105 shadow-sm min-h-[80px] flex flex-col justify-center ${
             isBooked
               ? "bg-red-400 text-white cursor-not-allowed opacity-75"
               : isSelected
@@ -547,7 +654,8 @@ function LaboratoryExams() {
               : "bg-gradient-to-r from-green-400 to-blue-500 text-white hover:from-green-500 hover:to-blue-600"
           }`}
         >
-          {slot}
+          <div className="font-semibold text-sm">{slot.display}</div>
+          <div className="text-xs mt-1 opacity-90">{slot.timeRange}</div>
         </div>
       );
     });
@@ -583,10 +691,20 @@ function LaboratoryExams() {
         <CheckCircle className="absolute right-3 top-3 w-5 h-5 text-green-600" />
       ) : null}
       {state.errors[name] && (
-        <p className="text-red-500 text-sm mt-1">{name} is required</p>
+        <p className="text-red-500 text-sm mt-1">
+          {name === "bloodType" && "Blood type is required"}
+          {name === "labTestName" && "Lab test is required"}
+          {name === "clinic" && "Clinic is required"}
+          {name === "referDoctor" && "Referring doctor is required"}
+          {!["bloodType", "labTestName", "clinic", "referDoctor"].includes(
+            name
+          ) && `${name} is required`}
+        </p>
       )}
     </div>
   );
+
+  const maxPages = Math.ceil(timeSlots.length / 20);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 font-sans relative">
@@ -626,6 +744,221 @@ function LaboratoryExams() {
       </div>
 
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8 p-8">
+        {/* Medical Information - First Column */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
+          <div className="flex items-center space-x-3 mb-6">
+            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+              <Microscope className="w-6 h-6 text-purple-600" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-800">
+              Medical Information
+            </h2>
+          </div>
+
+          <div className="space-y-4">
+            <SelectField
+              name="referDoctor"
+              icon={User}
+              placeholder="-- Select referring doctor (optional) --"
+              options={state.doctors.map((doctor) => ({
+                value: doctor.fullName,
+                label: `Dr. ${doctor.fullName} - ${doctor.specialty}`,
+              }))}
+              onChange={(e) => {
+                const selected = state.doctors.find(
+                  (d) => d.fullName === e.target.value
+                );
+                setForm((prev) => ({
+                  ...prev,
+                  referDoctor: e.target.value,
+                  userId: selected?.userId || "",
+                }));
+                setState((prev) => ({
+                  ...prev,
+                  selectedDoctorInfo: selected,
+                }));
+              }}
+            />
+
+            {state.selectedDoctorInfo && (
+              <div className="text-sm text-gray-700 bg-blue-50 rounded p-3 border border-blue-200 mb-4">
+                <p>
+                  <strong>Doctor:</strong> Dr.{" "}
+                  {state.selectedDoctorInfo.fullName}
+                </p>
+                <p>
+                  <strong>Specialty:</strong>{" "}
+                  {state.selectedDoctorInfo.specialty}
+                </p>
+              </div>
+            )}
+
+            <SelectField
+              name="labTestName"
+              icon={Microscope}
+              placeholder="-- Select Lab Test --"
+              options={state.examTypes.map((type) => ({
+                value: type.name,
+                label: type.name,
+              }))}
+              onChange={(e) => {
+                handleChange(e);
+                const found = state.examTypes.find(
+                  (ex) => ex.name === e.target.value
+                );
+                setState((prev) => ({
+                  ...prev,
+                  selectedDescription: found ? found.description : "",
+                  selectedServiceFee: found ? found.serviceFee : null,
+                }));
+              }}
+            />
+
+            {state.selectedDescription && (
+              <div className="text-gray-600 text-sm mt-2 bg-gray-50 rounded p-2 border border-gray-200">
+                {state.selectedDescription}
+              </div>
+            )}
+
+            {/* Service Fee Display */}
+            {state.selectedServiceFee && (
+              <div className="flex items-center space-x-2 bg-green-50 rounded-lg p-3 border border-green-200">
+                <div className="w-5 h-5 text-green-600" />
+                <div>
+                  <p className="text-sm font-semibold text-green-800">
+                    Service Fee
+                  </p>
+                  <p className="text-lg font-bold text-green-700">
+                    ₱
+                    {typeof state.selectedServiceFee === "number"
+                      ? state.selectedServiceFee.toLocaleString()
+                      : state.selectedServiceFee}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <SelectField
+              name="clinic"
+              icon={User}
+              placeholder="-- Select Clinic --"
+              options={state.clinics.map((clinic) => {
+                console.log("Mapping clinic for dropdown:", clinic);
+                return {
+                  value: clinic.name,
+                  label: clinic.name,
+                };
+              })}
+              onChange={(e) => {
+                console.log("Clinic dropdown changed to:", e.target.value);
+                console.log("Available clinics:", state.clinics);
+
+                const selected = state.clinics.find(
+                  (c) => c.name === e.target.value
+                );
+                console.log("Found selected clinic:", selected);
+
+                const clinicId =
+                  selected?.id || selected?.clinicId || selected?.key || "";
+                console.log("Extracted clinic ID:", clinicId);
+
+                setForm((prev) => ({
+                  ...prev,
+                  clinic: e.target.value,
+                  clinicId: clinicId,
+                  slotNumber: "", // Reset slot when clinic changes
+                }));
+                setState((prev) => ({
+                  ...prev,
+                  selectedClinicInfo: selected,
+                  currentPage: 0, // Reset to first page of slots
+                  errors: {
+                    ...prev.errors,
+                    clinic: validateField("clinic", e.target.value),
+                    clinicId: clinicId ? null : true,
+                    slotNumber: true, // Mark slot as required again
+                  },
+                }));
+              }}
+            />
+
+            {state.selectedClinicInfo && (
+              <div className="text-sm text-gray-700 bg-gray-50 rounded p-3 border border-gray-200 mb-4">
+                <p>
+                  <strong>Address:</strong>{" "}
+                  {state.selectedClinicInfo.addressLine ||
+                    state.selectedClinicInfo.address ||
+                    "Not provided"}
+                </p>
+                <p>
+                  <strong>Type:</strong>{" "}
+                  {state.selectedClinicInfo.type ||
+                    state.selectedClinicInfo.clinicType ||
+                    "Not specified"}
+                </p>
+              </div>
+            )}
+
+            {/* Patient Complaint Fields */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <label className="text-sm font-semibold text-gray-700">
+                  Patient Complaints (optional)
+                </label>
+                <button
+                  type="button"
+                  onClick={addComplaintField}
+                  className="flex items-center space-x-1 px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-colors text-sm font-medium"
+                  disabled={state.submitting}
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add</span>
+                </button>
+              </div>
+
+              {form.patientComplaint.map((complaint, index) => (
+                <div key={index} className="relative mb-2">
+                  <FileText className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                  <input
+                    type="text"
+                    value={complaint}
+                    onChange={(e) =>
+                      handleComplaintChange(index, e.target.value)
+                    }
+                    placeholder={`Complaint ${index + 1}`}
+                    className="w-full pl-10 pr-12 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
+                    disabled={state.submitting}
+                  />
+                  {form.patientComplaint.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeComplaintField(index)}
+                      className="absolute right-3 top-3 w-5 h-5 text-red-500 hover:text-red-700 transition-colors"
+                      disabled={state.submitting}
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="relative">
+              <FileText className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+              <textarea
+                name="notes"
+                value={form.notes}
+                onChange={handleChange}
+                placeholder="Additional Notes (optional)"
+                className="w-full pl-10 pr-4 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-500 focus:outline-none transition-colors resize-none"
+                disabled={state.submitting}
+                rows="3"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Patient Information - Second Column */}
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
           <div className="flex items-center space-x-3 mb-6">
             <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -752,194 +1085,10 @@ function LaboratoryExams() {
                 )}
               </div>
             </div>
-
-            <div className="border-t pt-4 mt-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                <Microscope className="w-5 h-5 mr-2 text-purple-600" />
-                Medical Information
-              </h3>
-
-              <SelectField
-                name="referDoctor"
-                icon={User}
-                placeholder="-- Select referring doctor (optional) --"
-                options={state.doctors.map((doctor) => ({
-                  value: doctor.fullName,
-                  label: `Dr. ${doctor.fullName} - ${doctor.specialty}`,
-                }))}
-                onChange={(e) => {
-                  const selected = state.doctors.find(
-                    (d) => d.fullName === e.target.value
-                  );
-                  setForm((prev) => ({
-                    ...prev,
-                    referDoctor: e.target.value,
-                    userId: selected?.userId || "",
-                  }));
-                  setState((prev) => ({
-                    ...prev,
-                    selectedDoctorInfo: selected,
-                  }));
-                }}
-              />
-
-              {state.selectedDoctorInfo && (
-                <div className="text-sm text-gray-700 bg-blue-50 rounded p-3 border border-blue-200 mb-4">
-                  <p>
-                    <strong>Doctor:</strong> Dr.{" "}
-                    {state.selectedDoctorInfo.fullName}
-                  </p>
-                  <p>
-                    <strong>Specialty:</strong>{" "}
-                    {state.selectedDoctorInfo.specialty}
-                  </p>
-                </div>
-              )}
-
-              <SelectField
-                name="labTestName"
-                icon={Microscope}
-                placeholder="-- Select Lab Test --"
-                options={state.examTypes.map((type) => ({
-                  value: type.name,
-                  label: type.name,
-                }))}
-                onChange={(e) => {
-                  handleChange(e);
-                  const found = state.examTypes.find(
-                    (ex) => ex.name === e.target.value
-                  );
-                  setState((prev) => ({
-                    ...prev,
-                    selectedDescription: found ? found.description : "",
-                  }));
-                }}
-              />
-
-              {state.selectedDescription && (
-                <div className="text-gray-600 text-sm mt-2 bg-gray-50 rounded p-2 border border-gray-200">
-                  {state.selectedDescription}
-                </div>
-              )}
-
-              <SelectField
-                name="clinic"
-                icon={User}
-                placeholder="-- Select Clinic --"
-                options={state.clinics.map((clinic) => {
-                  console.log("Mapping clinic for dropdown:", clinic);
-                  return {
-                    value: clinic.name,
-                    label: clinic.name,
-                  };
-                })}
-                onChange={(e) => {
-                  console.log("Clinic dropdown changed to:", e.target.value);
-                  console.log("Available clinics:", state.clinics);
-
-                  const selected = state.clinics.find(
-                    (c) => c.name === e.target.value
-                  );
-                  console.log("Found selected clinic:", selected);
-
-                  const clinicId =
-                    selected?.id || selected?.clinicId || selected?.key || "";
-                  console.log("Extracted clinic ID:", clinicId);
-
-                  setForm((prev) => ({
-                    ...prev,
-                    clinic: e.target.value,
-                    clinicId: clinicId,
-                  }));
-                  setState((prev) => ({
-                    ...prev,
-                    selectedClinicInfo: selected,
-                    errors: {
-                      ...prev.errors,
-                      clinic: validateField("clinic", e.target.value),
-                      clinicId: clinicId ? null : true,
-                    },
-                  }));
-                }}
-              />
-
-              {state.selectedClinicInfo && (
-                <div className="text-sm text-gray-700 bg-gray-50 rounded p-3 border border-gray-200 mb-4">
-                  <p>
-                    <strong>Address:</strong>{" "}
-                    {state.selectedClinicInfo.addressLine ||
-                      state.selectedClinicInfo.address ||
-                      "Not provided"}
-                  </p>
-                  <p>
-                    <strong>Type:</strong>{" "}
-                    {state.selectedClinicInfo.type ||
-                      state.selectedClinicInfo.clinicType ||
-                      "Not specified"}
-                  </p>
-                </div>
-              )}
-
-              {/* Patient Complaint Fields */}
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-3">
-                  <label className="text-sm font-semibold text-gray-700">
-                    Patient Complaints (optional)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={addComplaintField}
-                    className="flex items-center space-x-1 px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg transition-colors text-sm font-medium"
-                    disabled={state.submitting}
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Add</span>
-                  </button>
-                </div>
-
-                {form.patientComplaint.map((complaint, index) => (
-                  <div key={index} className="relative mb-2">
-                    <FileText className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                    <input
-                      type="text"
-                      value={complaint}
-                      onChange={(e) =>
-                        handleComplaintChange(index, e.target.value)
-                      }
-                      placeholder={`Complaint ${index + 1}`}
-                      className="w-full pl-10 pr-12 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                      disabled={state.submitting}
-                    />
-                    {form.patientComplaint.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeComplaintField(index)}
-                        className="absolute right-3 top-3 w-5 h-5 text-red-500 hover:text-red-700 transition-colors"
-                        disabled={state.submitting}
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div className="relative">
-                <FileText className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                <textarea
-                  name="notes"
-                  value={form.notes}
-                  onChange={handleChange}
-                  placeholder="Additional Notes (optional)"
-                  className="w-full pl-10 pr-4 py-3 rounded-lg border-2 border-gray-300 focus:border-blue-500 focus:outline-none transition-colors resize-none"
-                  disabled={state.submitting}
-                  rows="3"
-                />
-              </div>
-            </div>
           </div>
         </div>
 
+        {/* Time Slots - Third Column */}
         <div
           ref={slotRef}
           className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6"
@@ -949,72 +1098,91 @@ function LaboratoryExams() {
               <Clock className="w-6 h-6 text-purple-600" />
             </div>
             <h2 className="text-xl font-bold text-gray-800">
-              Select Time Slot
+              Select Ticket Slot
             </h2>
           </div>
 
-          <div className="flex justify-between items-center mb-6">
-            <button
-              disabled={state.currentPage === 0}
-              onClick={() =>
-                setState((prev) => ({
-                  ...prev,
-                  currentPage: Math.max(0, prev.currentPage - 1),
-                }))
-              }
-              className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>Prev</span>
-            </button>
-            <div className="bg-gradient-to-r from-purple-100 to-blue-100 px-4 py-2 rounded-lg">
-              <span className="font-semibold text-gray-700">
-                Slots {state.currentPage * 50 + 1}–
-                {(state.currentPage + 1) * 50}
-              </span>
-            </div>
-            <button
-              onClick={() =>
-                setState((prev) => ({
-                  ...prev,
-                  currentPage: prev.currentPage + 1,
-                }))
-              }
-              className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium"
-            >
-              <span>Next</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-5 gap-3 justify-items-center mb-4">
-            {renderSlots()}
-          </div>
-
-          <div className="flex justify-center space-x-6 text-sm">
-            {[
-              { color: "from-green-400 to-blue-500", label: "Available" },
-              { color: "bg-red-400", label: "Booked" },
-              { color: "from-blue-600 to-purple-600", label: "Selected" },
-            ].map(({ color, label }) => (
-              <div key={label} className="flex items-center space-x-2">
-                <div
-                  className={`w-4 h-4 rounded ${
-                    color.includes("from") ? `bg-gradient-to-r ${color}` : color
-                  }`}
-                ></div>
-                <span className="text-gray-600">{label}</span>
+          {form.clinic && form.labTestName ? (
+            <>
+              <div className="flex justify-between items-center mb-6">
+                <button
+                  disabled={state.currentPage === 0}
+                  onClick={() =>
+                    setState((prev) => ({
+                      ...prev,
+                      currentPage: Math.max(0, prev.currentPage - 1),
+                    }))
+                  }
+                  className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  <span>Prev</span>
+                </button>
+                <div className="bg-gradient-to-r from-purple-100 to-blue-100 px-4 py-2 rounded-lg">
+                  <span className="font-semibold text-gray-700">
+                    Page {state.currentPage + 1} of {maxPages}
+                  </span>
+                </div>
+                <button
+                  disabled={state.currentPage >= maxPages - 1}
+                  onClick={() =>
+                    setState((prev) => ({
+                      ...prev,
+                      currentPage: prev.currentPage + 1,
+                    }))
+                  }
+                  className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                >
+                  <span>Next</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
-            ))}
-          </div>
 
-          {state.errors.slotNumber && (
-            <p className="text-red-500 text-sm mt-4 text-center p-3 bg-red-50 rounded-lg">
-              Please select a time slot
-            </p>
+              <div className="grid grid-cols-2 gap-3 justify-items-center mb-4">
+                {renderSlots()}
+              </div>
+
+              <div className="flex justify-center space-x-6 text-sm">
+                {[
+                  { color: "from-green-400 to-blue-500", label: "Available" },
+                  { color: "bg-red-400", label: "Booked" },
+                  { color: "from-blue-600 to-purple-600", label: "Selected" },
+                ].map(({ color, label }) => (
+                  <div key={label} className="flex items-center space-x-2">
+                    <div
+                      className={`w-4 h-4 rounded ${
+                        color.includes("from")
+                          ? `bg-gradient-to-r ${color}`
+                          : color
+                      }`}
+                    ></div>
+                    <span className="text-gray-600">{label}</span>
+                  </div>
+                ))}
+              </div>
+
+              {state.errors.slotNumber && (
+                <p className="text-red-500 text-sm mt-4 text-center p-3 bg-red-50 rounded-lg">
+                  Please select a time slot
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <Clock className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500 font-medium">
+                Please select a clinic and lab test first
+              </p>
+              <p className="text-gray-400 text-sm mt-2">
+                Time slots will be available after making your selections
+              </p>
+            </div>
           )}
         </div>
+      </div>
 
+      {/* Booking Summary - Full Width Below */}
+      <div className="max-w-7xl mx-auto px-8 pb-8">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
           <div className="flex items-center space-x-3 mb-6">
             <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
@@ -1029,7 +1197,7 @@ function LaboratoryExams() {
             </div>
           </div>
 
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
               {
                 title: "Patient Details",
@@ -1077,8 +1245,31 @@ function LaboratoryExams() {
               },
               {
                 title: "Lab Test Details",
-                content: form.labTestName || "No test selected",
-                extra: state.selectedDescription || "No description provided",
+                content: (
+                  <div className="space-y-2">
+                    <p>
+                      <strong>Test:</strong>{" "}
+                      {form.labTestName || "No test selected"}
+                    </p>
+                    {state.selectedDescription && (
+                      <p className="text-sm text-gray-600">
+                        {state.selectedDescription}
+                      </p>
+                    )}
+                    {state.selectedServiceFee && (
+                      <div className="flex items-center space-x-2 bg-green-50 rounded-lg p-2 border border-green-200">
+                        <div className="w-4 h-4 text-green-600" />
+                        <span className="text-sm font-semibold text-green-800">
+                          Service Fee: ₱
+                          {typeof state.selectedServiceFee === "number"
+                            ? state.selectedServiceFee.toLocaleString()
+                            : state.selectedServiceFee}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ),
+                isSpecial: true,
               },
               form.clinic && {
                 title: "Clinic Information",
@@ -1131,11 +1322,13 @@ function LaboratoryExams() {
                     <div className="flex items-center space-x-2">
                       <Clock className="w-4 h-4 text-blue-600" />
                       <span className="font-medium text-blue-800">
-                        Slot #{form.slotNumber}
+                        {timeSlots.find(
+                          (s) => s.number === parseInt(form.slotNumber)
+                        )?.display || `Slot #${form.slotNumber}`}
                       </span>
                     </div>
                     <p className="text-sm text-blue-600 mt-1">
-                      Estimated Time: {getEstimatedTime(form.slotNumber)}
+                      Time: {getEstimatedTime(form.slotNumber)}
                     </p>
                   </div>
                 ),
