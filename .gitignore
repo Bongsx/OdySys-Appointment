@@ -7,15 +7,22 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Dependencies
+node_modules/
 
-# Editor directories and files
+# Build outputs
+dist/
+dist-ssr/
+
+# Local environment files (never commit secrets)
+*.local
+.env
+server/.env
+
+# Editor/OS files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
@@ -23,12 +30,5 @@ dist-ssr
 *.sln
 *.sw?
 
-node_modules
-/server/api/send-lab-confirmation/index.js
-/server/api/send-password-reset/index.js
-/server/api/send-patient-confirmation/index.js
-/server/api/send-welcome-email/index.js
-/server/.env
-/server/server.js
-/src/assests/firebase/firebase.js
-/src/assests/context/AuthContext.jsx
+# Frontend sensitive config
+src/assests/firebase/firebase.js
