@@ -43,109 +43,289 @@ function Dashboard() {
     fetchAllAppointmentData(userData);
   }, [navigate]);
 
+  // User matching function with enhanced logging
+  const isUserMatch = (appointmentData, currentUser, usersData) => {
+    const currentUserEmail = currentUser.email?.toLowerCase();
+    const currentUserUID =
+      currentUser.uid || currentUser.userId || currentUser.id;
+
+    console.log("=== USER MATCHING DEBUG ===");
+    console.log("Current User Info:", {
+      email: currentUserEmail,
+      uid: currentUserUID,
+      fullUser: currentUser,
+    });
+    console.log("Appointment/Lab Data:", {
+      id: appointmentData.id || "unknown",
+      userId: appointmentData.userId,
+      email: appointmentData.email,
+      patientName: appointmentData.patientName,
+      type: appointmentData.type,
+      status: appointmentData.status,
+    });
+
+    // Primary matching - Firebase Auth UID (most reliable)
+    const appointmentUIDs = [
+      appointmentData.uid,
+      appointmentData.userId, // This should match your lab request
+      appointmentData.patientUID,
+      appointmentData.patientId,
+      appointmentData.patient?.uid,
+      appointmentData.patient?.userId,
+      appointmentData.createdBy?.uid,
+      appointmentData.createdBy?.userId,
+      appointmentData.userRef,
+      appointmentData.patientRef,
+      appointmentData.createdByRef,
+    ].filter(Boolean);
+
+    console.log("Found UIDs in appointment:", appointmentUIDs);
+    const uidMatch = appointmentUIDs.some((uid) => uid === currentUserUID);
+    console.log(
+      "UID Match:",
+      uidMatch,
+      `(${currentUserUID} in [${appointmentUIDs.join(", ")}])`
+    );
+
+    // Secondary matching - Email matching
+    const appointmentEmails = [
+      appointmentData.email?.toLowerCase(),
+      appointmentData.patientEmail?.toLowerCase(),
+      appointmentData.patient?.email?.toLowerCase(),
+      appointmentData.createdBy?.email?.toLowerCase(),
+    ].filter(Boolean);
+
+    console.log("Found emails in appointment:", appointmentEmails);
+    const emailMatch =
+      currentUserEmail && appointmentEmails.includes(currentUserEmail);
+    console.log(
+      "Email Match:",
+      emailMatch,
+      `(${currentUserEmail} in [${appointmentEmails.join(", ")}])`
+    );
+
+    // Tertiary matching - Cross-reference with users node
+    let userNodeMatch = false;
+    if (!uidMatch && appointmentEmails.length > 0 && usersData) {
+      Object.keys(usersData).forEach((userUID) => {
+        const userData = usersData[userUID];
+        if (
+          userData.email?.toLowerCase() === currentUserEmail &&
+          appointmentEmails.includes(userData.email?.toLowerCase())
+        ) {
+          userNodeMatch = true;
+        }
+      });
+    }
+    console.log("User Node Match:", userNodeMatch);
+
+    const isMatch = uidMatch || emailMatch || userNodeMatch;
+    console.log("FINAL MATCH RESULT:", isMatch);
+    console.log("=========================");
+
+    return isMatch;
+  };
+
   const fetchAllAppointmentData = (userData) => {
     setLoading(true);
 
-    const userEmail = userData.email;
-    const userId = userData.userId || userData.uid;
+    console.log("Fetching data for user:", {
+      email: userData.email,
+      uid: userData.uid || userData.userId || userData.id,
+      fullUserData: userData,
+    });
 
-    // Fetch all appointments sections
+    // Also fetch users node to get complete user data if needed
+    const usersRef = ref(database, "users");
     const appointmentsRef = ref(database, "appointments");
+    const clinicLabRequestsRef = ref(database, "clinicLabRequests");
 
+    let usersData = null;
+    let appointmentsData = null;
+    let clinicLabData = null;
+    let dataLoadCount = 0;
+
+    const processAllData = () => {
+      if (dataLoadCount === 3) {
+        const userAppointments = [];
+
+        // Get current user's complete data from users node
+        let currentUserFromDB = null;
+        if (usersData && userData.uid) {
+          currentUserFromDB =
+            usersData[userData.uid] ||
+            Object.values(usersData).find(
+              (user) =>
+                user.email?.toLowerCase() === userData.email?.toLowerCase()
+            );
+        }
+
+        console.log("Current user from DB:", currentUserFromDB);
+
+        // Use DB user data if available, otherwise use localStorage data
+        const userForMatching = currentUserFromDB || userData;
+
+        // Process direct appointments (consultations)
+        if (appointmentsData) {
+          Object.keys(appointmentsData).forEach((key) => {
+            const appointment = appointmentsData[key];
+
+            if (isUserMatch(appointment, userForMatching, usersData)) {
+              console.log("Found matching appointment:", key, appointment);
+
+              userAppointments.push({
+                id: key,
+                type: "consultation",
+                ...appointment,
+                testName:
+                  appointment.type ||
+                  appointment.serviceType ||
+                  "General Consultation",
+                doctor:
+                  appointment.doctor || appointment.doctorName || "Doctor",
+                patientName:
+                  `${
+                    appointment.patient?.firstName ||
+                    appointment.firstName ||
+                    ""
+                  } ${
+                    appointment.patient?.lastName || appointment.lastName || ""
+                  }`.trim() || appointment.patientName,
+                scheduledDateTime:
+                  appointment.appointmentDate && appointment.appointmentTime
+                    ? `${appointment.appointmentDate}T${convertTo24Hour(
+                        appointment.appointmentTime
+                      )}`
+                    : appointment.scheduledDateTime || new Date().toISOString(),
+                email: appointment.patient?.email || appointment.email,
+                source: "appointments",
+                clinicName: appointment.clinicName || appointment.clinic,
+                serviceFee: normalizeServiceFee(appointment.serviceFee),
+              });
+            }
+          });
+        }
+
+        // Process clinic lab requests
+        if (clinicLabData) {
+          Object.keys(clinicLabData).forEach((key) => {
+            const labRequest = clinicLabData[key];
+
+            if (isUserMatch(labRequest, userForMatching, usersData)) {
+              console.log("Found matching lab request:", key, labRequest);
+
+              userAppointments.push({
+                id: key,
+                type: "clinic_lab_request",
+                ...labRequest,
+                testName:
+                  labRequest.labTestName || labRequest.testName || "Lab Test",
+                doctor:
+                  labRequest.referDoctor ||
+                  labRequest.doctor ||
+                  "Laboratory Staff",
+                patientName:
+                  labRequest.patientName ||
+                  `${labRequest.firstName || ""} ${
+                    labRequest.lastName || ""
+                  }`.trim(),
+                scheduledDateTime:
+                  labRequest.createdAt?.date && labRequest.estimatedTime
+                    ? `${labRequest.createdAt.date}T${convertTo24Hour(
+                        labRequest.estimatedTime
+                      )}`
+                    : labRequest.scheduledDateTime || new Date().toISOString(),
+                source: "Clinic Lab Requests",
+                clinicName: labRequest.clinic || labRequest.clinicName,
+                serviceFee: normalizeServiceFee(labRequest.serviceFee),
+                bloodType: labRequest.bloodType,
+                description: labRequest.description,
+                slotNumber: labRequest.slotNumber,
+                contactNumber: labRequest.contactNumber,
+                dateOfBirth: labRequest.dateOfBirth,
+              });
+            }
+          });
+        }
+
+        console.log("Final filtered appointments for user:", userAppointments);
+        setAllAppointments(userAppointments);
+        calculatePatientStats(userAppointments);
+        generateRecentActivity(userAppointments);
+        setLoading(false);
+      }
+    };
+
+    // Listen to users data
+    onValue(
+      usersRef,
+      (snapshot) => {
+        usersData = snapshot.val() || {};
+        console.log(
+          "Users data loaded:",
+          Object.keys(usersData).length,
+          "users"
+        );
+        dataLoadCount++;
+        processAllData();
+      },
+      (error) => {
+        console.error("Error fetching users:", error);
+        usersData = {};
+        dataLoadCount++;
+        processAllData();
+      }
+    );
+
+    // Listen to appointments
     onValue(
       appointmentsRef,
       (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-          const userAppointments = [];
-
-          // Process walk-in appointments
-          if (data.appointments) {
-            Object.keys(data.appointments).forEach((key) => {
-              const appointment = data.appointments[key];
-              if (
-                appointment.createdBy?.email === userEmail ||
-                appointment.patientId === userId
-              ) {
-                userAppointments.push({
-                  id: key,
-                  type: "walk_in",
-                  ...appointment,
-                  testName: appointment.service?.name,
-                  doctor: "Laboratory Staff",
-                  scheduledDateTime: appointment.scheduledDate,
-                });
-              }
-            });
-          }
-
-          // Process consultation appointments
-          if (data.consultations) {
-            Object.keys(data.consultations).forEach((key) => {
-              const consultation = data.consultations[key];
-              if (consultation.patient?.email === userEmail) {
-                userAppointments.push({
-                  id: key,
-                  type: "consultation",
-                  ...consultation,
-                  testName: consultation.type,
-                  doctor: consultation.doctor,
-                  patientName: `${
-                    consultation.patient.patientFirstName ||
-                    consultation.patient.firstName
-                  } ${
-                    consultation.patient.patientLastName ||
-                    consultation.patient.lastName
-                  }`,
-                  scheduledDateTime: `${
-                    consultation.appointmentDate
-                  }T${convertTo24Hour(consultation.appointmentTime)}`,
-                  email: consultation.patient.email,
-                });
-              }
-            });
-          }
-
-          // Process laboratory appointments
-          if (data.laboratory) {
-            Object.keys(data.laboratory).forEach((key) => {
-              const labTest = data.laboratory[key];
-              if (labTest.email === userEmail || labTest.userId === userId) {
-                userAppointments.push({
-                  id: key,
-                  type: "laboratory",
-                  ...labTest,
-                  testName: labTest.labTestName,
-                  doctor: labTest.referDoctor,
-                  patientName: labTest.patientName,
-                  scheduledDateTime: `${
-                    labTest.createdAt.date
-                  }T${convertTo24Hour(labTest.estimatedTime)}`,
-                });
-              }
-            });
-          }
-
-          setAllAppointments(userAppointments);
-          calculatePatientStats(userAppointments);
-          generateRecentActivity(userAppointments);
-        } else {
-          setAllAppointments([]);
-          setPatientData({
-            upcomingAppointments: 0,
-            pendingResults: 0,
-            completedTests: 0,
-            totalVisits: 0,
-          });
-          setRecentActivity([]);
-        }
-        setLoading(false);
+        appointmentsData = snapshot.val() || {};
+        console.log(
+          "Raw appointments data:",
+          Object.keys(appointmentsData).length,
+          "appointments"
+        );
+        dataLoadCount++;
+        processAllData();
       },
       (error) => {
         console.error("Error fetching appointments:", error);
-        setLoading(false);
+        appointmentsData = {};
+        dataLoadCount++;
+        processAllData();
       }
     );
+
+    // Listen to clinic lab requests
+    onValue(
+      clinicLabRequestsRef,
+      (snapshot) => {
+        clinicLabData = snapshot.val() || {};
+        console.log(
+          "Raw clinic lab data:",
+          Object.keys(clinicLabData).length,
+          "lab requests"
+        );
+        dataLoadCount++;
+        processAllData();
+      },
+      (error) => {
+        console.error("Error fetching clinic lab requests:", error);
+        clinicLabData = {};
+        dataLoadCount++;
+        processAllData();
+      }
+    );
+  };
+
+  // Helper function to normalize service fee
+  const normalizeServiceFee = (serviceFee) => {
+    if (typeof serviceFee === "object" && serviceFee !== null) {
+      return serviceFee.fee || serviceFee.name || serviceFee.amount || "N/A";
+    }
+    return serviceFee || "N/A";
   };
 
   // Helper function to convert time to 24-hour format
@@ -177,117 +357,169 @@ function Dashboard() {
     return timeStr.includes(":") ? timeStr : "00:00";
   };
 
+  // Fixed stats calculation - only counting pending status
   const calculatePatientStats = (appointmentsList) => {
-    const now = new Date();
-
     const stats = {
       upcomingAppointments: 0,
       pendingResults: 0,
       completedTests: 0,
-      totalVisits: 0,
+      totalVisits: appointmentsList.length,
     };
 
-    // Count only consultations and laboratory visits for all statistics
-    let consultationVisits = 0;
-    let laboratoryVisits = 0;
+    console.log("Calculating stats for appointments:", appointmentsList);
 
     appointmentsList.forEach((appointment) => {
       const status = appointment.status?.toLowerCase();
       const appointmentType = appointment.type;
 
-      // Only process consultations and laboratory appointments (exclude walk-in)
+      console.log(`Processing appointment ${appointment.id}:`, {
+        status,
+        appointmentType,
+        testName: appointment.testName,
+        source: appointment.source,
+        originalType: appointment.type,
+      });
+
+      // Count upcoming appointments (Pending, Confirmed, Scheduled, or Requested)
       if (
-        appointmentType === "consultation" ||
-        appointmentType === "laboratory"
+        status === "pending" ||
+        status === "confirmed" ||
+        status === "scheduled" ||
+        status === "requested" ||
+        status === "approved"
       ) {
-        // Count upcoming appointments (Pending, Confirmed, or Scheduled)
+        stats.upcomingAppointments++;
+        console.log(
+          `Added to upcoming appointments: ${appointment.testName} (${status})`
+        );
+      }
+
+      // Count pending results - ONLY pending status from both nodes
+      if (status === "pending") {
+        // Check if it's from clinicLabRequests OR appointments node
         if (
-          status === "pending" ||
-          status === "confirmed" ||
-          status === "scheduled"
+          appointmentType === "clinic_lab_request" || // This is the correct type set in your data processing
+          appointment.source === "Clinic Lab Requests" || // This is the source you set
+          appointmentType === "consultation" || // Regular appointments
+          appointment.source === "appointments" // Regular appointments source
         ) {
-          stats.upcomingAppointments++;
-        }
-
-        // Count pending results
-        if (status === "pending") {
           stats.pendingResults++;
+          console.log(
+            `Added to pending results: ${appointment.testName} (${status}) - Type: ${appointmentType} - Source: ${appointment.source}`
+          );
         }
+      }
 
-        // Count completed tests
-        if (status === "completed" || status === "done") {
-          stats.completedTests++;
-        }
-
-        // Count total visits
-        if (appointmentType === "consultation") {
-          consultationVisits++;
-        } else if (appointmentType === "laboratory") {
-          laboratoryVisits++;
-        }
+      // Count completed tests
+      if (
+        status === "completed" ||
+        status === "done" ||
+        status === "finished" ||
+        status === "results_ready"
+      ) {
+        stats.completedTests++;
+        console.log(
+          `Added to completed tests: ${appointment.testName} (${status})`
+        );
       }
     });
 
-    // Set total visits as sum of consultations and laboratory appointments only
-    stats.totalVisits = consultationVisits + laboratoryVisits;
+    console.log("Final calculated stats:", stats);
+    console.log(
+      "Stats breakdown by status:",
+      appointmentsList.reduce((acc, apt) => {
+        const status = apt.status?.toLowerCase() || "unknown";
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+      }, {})
+    );
 
     setPatientData(stats);
   };
 
+  // Enhanced activity generation with better messaging
   const generateRecentActivity = (appointmentsList) => {
-    // Sort appointments by creation date and get recent ones
     const sortedAppointments = appointmentsList
       .sort((a, b) => {
         const dateA = new Date(
-          a.createdAt || a.scheduledDateTime || Date.now()
+          a.createdAt?.date || a.createdAt || a.scheduledDateTime || Date.now()
         );
         const dateB = new Date(
-          b.createdAt || b.scheduledDateTime || Date.now()
+          b.createdAt?.date || b.createdAt || b.scheduledDateTime || Date.now()
         );
         return dateB - dateA;
       })
-      .slice(0, 5);
+      .slice(0, 8); // Increased to show more recent activity
 
     const activities = sortedAppointments.map((appointment) => {
       let activityType = "appointment";
       let message = "";
 
       const status = appointment.status?.toLowerCase();
-      const testName =
-        appointment.testName || appointment.service?.name || "Appointment";
+      const testName = appointment.testName || "Service";
       const doctor = appointment.doctor || "Staff";
+      const clinicName = appointment.clinicName || appointment.clinic || "";
 
-      if (status === "pending") {
-        activityType = "appointment";
-        message = `Upcoming ${testName}${
-          doctor !== "Staff" ? ` with Dr. ${doctor}` : ""
-        }`;
-      } else if (status === "completed" || status === "done") {
-        activityType = "result";
-        message = `${testName} results available`;
-      } else if (status === "confirmed") {
-        activityType = "booking";
-        message = `${testName} appointment confirmed`;
+      // Generate activity message based on status and type
+      if (appointment.type === "clinic_lab_request") {
+        if (status === "pending" || status === "requested") {
+          activityType = "appointment";
+          message = `${testName} lab test requested${
+            clinicName ? ` at ${clinicName}` : ""
+          }`;
+        } else if (status === "completed" || status === "results_ready") {
+          activityType = "result";
+          message = `${testName} lab results available${
+            clinicName ? ` from ${clinicName}` : ""
+          }`;
+        } else if (status === "processing" || status === "in_progress") {
+          activityType = "appointment";
+          message = `${testName} lab test being processed${
+            clinicName ? ` at ${clinicName}` : ""
+          }`;
+        } else {
+          activityType = "booking";
+          message = `${testName} lab request ${status}${
+            clinicName ? ` at ${clinicName}` : ""
+          }`;
+        }
       } else {
-        activityType = "booking";
-        message = `${testName} appointment scheduled`;
+        // Regular consultation appointments
+        if (status === "pending" || status === "requested") {
+          activityType = "appointment";
+          message = `${testName} appointment pending with ${doctor}`;
+        } else if (status === "confirmed" || status === "approved") {
+          activityType = "booking";
+          message = `${testName} appointment confirmed with ${doctor}`;
+        } else if (status === "completed") {
+          activityType = "result";
+          message = `${testName} consultation completed with ${doctor}`;
+        } else {
+          activityType = "appointment";
+          message = `${testName} appointment ${status} with ${doctor}`;
+        }
       }
 
-      // Format date
+      // Format date and time
       let displayDate = "Today";
       let displayTime = "TBD";
 
       if (appointment.scheduledDateTime) {
         const scheduleDate = new Date(appointment.scheduledDateTime);
-        displayDate = scheduleDate.toLocaleDateString();
-        displayTime = scheduleDate.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
+        if (!isNaN(scheduleDate.getTime())) {
+          displayDate = scheduleDate.toLocaleDateString();
+          displayTime = scheduleDate.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        }
+      } else if (appointment.appointmentDate && appointment.appointmentTime) {
+        displayDate = new Date(
+          appointment.appointmentDate
+        ).toLocaleDateString();
+        displayTime = appointment.appointmentTime;
       } else if (appointment.estimatedTime) {
         displayTime = appointment.estimatedTime;
-      } else if (appointment.appointmentTime) {
-        displayTime = appointment.appointmentTime;
       }
 
       return {
@@ -299,6 +531,10 @@ function Dashboard() {
         status: appointment.status,
         testName: testName,
         doctor: doctor,
+        source: appointment.source,
+        appointmentType: appointment.type,
+        clinicName: clinicName,
+        serviceFee: appointment.serviceFee,
       };
     });
 
@@ -312,15 +548,23 @@ function Dashboard() {
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
       case "pending":
+      case "requested":
         return "text-orange-600";
       case "confirmed":
       case "scheduled":
+      case "approved":
         return "text-blue-600";
       case "completed":
       case "done":
+      case "results_ready":
+      case "finished":
         return "text-green-600";
       case "cancelled":
+      case "rejected":
         return "text-red-600";
+      case "processing":
+      case "in_progress":
+        return "text-purple-600";
       default:
         return "text-gray-600";
     }
@@ -369,7 +613,7 @@ function Dashboard() {
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <main className="flex-1 p-6 bg-gray-50">
+      <main className="flex-1 p-6 bg-gray-50 overflow-auto">
         {/* Welcome Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -455,33 +699,41 @@ function Dashboard() {
           </div>
 
           {recentActivity.length > 0 ? (
-            <div className="space-y-4">
-              {recentActivity.map((activity) => (
+            <div className="max-h-96 overflow-y-auto space-y-4 pr-2">
+              {recentActivity.map((activity, index) => (
                 <div
-                  key={activity.id}
+                  key={`${activity.source}-${activity.id}-${index}`}
                   className="flex items-start p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
                 >
                   <div
-                    className={`p-2 rounded-full mr-4 ${getActivityBgColor(
+                    className={`p-2 rounded-full mr-4 flex-shrink-0 ${getActivityBgColor(
                       activity.type
                     )}`}
                   >
                     {getActivityIcon(activity.type)}
                   </div>
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-800 mb-1">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-800 mb-1 break-words">
                       {activity.message}
                     </p>
-                    <div className="flex items-center text-sm text-gray-600 space-x-4">
-                      <span>{activity.date}</span>
-                      <span>{activity.time}</span>
+                    <div className="flex flex-wrap items-center text-sm text-gray-600 gap-2">
+                      <span className="flex-shrink-0">{activity.date}</span>
+                      <span className="flex-shrink-0">{activity.time}</span>
                       <span
-                        className={`font-medium ${getStatusColor(
+                        className={`font-medium flex-shrink-0 ${getStatusColor(
                           activity.status
                         )}`}
                       >
                         {activity.status}
                       </span>
+                      <span className="text-xs bg-gray-200 px-2 py-1 rounded flex-shrink-0">
+                        {activity.source}
+                      </span>
+                      {activity.serviceFee && activity.serviceFee !== "N/A" && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded flex-shrink-0">
+                          ₱{activity.serviceFee}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -492,7 +744,7 @@ function Dashboard() {
               <Activity className="w-12 h-12 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500">No recent activity found</p>
               <p className="text-sm text-gray-400">
-                Your appointments and results will appear here
+                Your appointments and lab requests will appear here
               </p>
             </div>
           )}

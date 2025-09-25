@@ -70,6 +70,7 @@ function PatientBooking() {
   const [manualConflict, setManualConflict] = useState("");
   const [userDataLoaded, setUserDataLoaded] = useState(false);
   const [doctorAvailability, setDoctorAvailability] = useState({});
+  const [doctorSpecificDates, setDoctorSpecificDates] = useState({}); // NEW: For specific dates
 
   // Service fee options
   const serviceFeeOptions = [
@@ -196,13 +197,23 @@ function PatientBooking() {
 
         // Build doctor availability object from database
         const availabilityMap = {};
+        const specificDatesMap = {}; // NEW: For specific dates
+
         Object.values(data).forEach((doctor) => {
           if (doctor.availability && doctor.availability.weeklySchedule) {
             availabilityMap[doctor.fullName] =
               doctor.availability.weeklySchedule;
           }
+
+          // NEW: Extract specific dates availability
+          if (doctor.availability && doctor.availability.specificDates) {
+            specificDatesMap[doctor.fullName] =
+              doctor.availability.specificDates;
+          }
         });
+
         setDoctorAvailability(availabilityMap);
+        setDoctorSpecificDates(specificDatesMap); // NEW: Set specific dates state
       }
     });
 
@@ -665,14 +676,78 @@ function PatientBooking() {
     );
   };
 
-  // Get available time slots for selected doctor based on database availability
-  const getDoctorSlots = () => {
-    if (!form.doctor || !doctorAvailability[form.doctor]) {
-      return []; // Return empty array if no doctor selected or no availability data
+  // Helper function to convert 12-hour format to 24-hour format for sorting
+  const convertTo24Hour = (time12) => {
+    const [time, period] = time12.split(" ");
+    let [hours, minutes] = time.split(":").map(Number);
+
+    if (period === "PM" && hours !== 12) {
+      hours += 12;
+    } else if (period === "AM" && hours === 12) {
+      hours = 0;
     }
 
-    const selectedDate = new Date(form.appointmentDate);
-    const dayOfWeek = selectedDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    return `${hours.toString().padStart(2, "0")}:${minutes
+      .toString()
+      .padStart(2, "0")}`;
+  };
+
+  // NEW: Helper function to generate time slots from time slot data
+  const generateTimeSlotsFromData = (timeSlotData) => {
+    const timeSlots = [];
+
+    timeSlotData.forEach((slot) => {
+      const startTime = slot.startTime; // e.g., "09:00"
+      const endTime = slot.endTime; // e.g., "17:00"
+
+      // Parse start and end times
+      const [startHour, startMinute] = startTime.split(":").map(Number);
+      const [endHour, endMinute] = endTime.split(":").map(Number);
+
+      // Convert to minutes for easier calculation
+      const startTotalMinutes = startHour * 60 + startMinute;
+      const endTotalMinutes = endHour * 60 + endMinute;
+
+      // Generate hourly slots between start and end time (INCLUSIVE of end time)
+      for (
+        let totalMinutes = startTotalMinutes;
+        totalMinutes <= endTotalMinutes;
+        totalMinutes += 60
+      ) {
+        const hour = Math.floor(totalMinutes / 60);
+        const minute = totalMinutes % 60;
+
+        // Convert to 12-hour format
+        let time12;
+        if (hour === 0) {
+          time12 = `12:${minute.toString().padStart(2, "0")} AM`;
+        } else if (hour < 12) {
+          time12 = `${hour}:${minute.toString().padStart(2, "0")} AM`;
+        } else if (hour === 12) {
+          time12 = `12:${minute.toString().padStart(2, "0")} PM`;
+        } else {
+          time12 = `${hour - 12}:${minute.toString().padStart(2, "0")} PM`;
+        }
+
+        timeSlots.push(time12);
+      }
+    });
+
+    // Remove duplicates and sort
+    const uniqueSlots = [...new Set(timeSlots)];
+    return uniqueSlots.sort((a, b) => {
+      const timeA = convertTo24Hour(a);
+      const timeB = convertTo24Hour(b);
+      return timeA.localeCompare(timeB);
+    });
+  };
+
+  // NEW: Function to get time slots for a specific date (either from weekly schedule or specific date)
+  const getDoctorSlotsForDate = (dateString) => {
+    if (!form.doctor) return [];
+
+    const selectedDate = new Date(dateString);
+    const dayOfWeek = selectedDate.getDay();
     const dayNames = [
       "sunday",
       "monday",
@@ -684,46 +759,59 @@ function PatientBooking() {
     ];
     const dayName = dayNames[dayOfWeek];
 
+    // Check if there's specific date availability first
+    const specificDates = doctorSpecificDates[form.doctor];
+    if (specificDates && specificDates[dateString]) {
+      const specificDateData = specificDates[dateString];
+      if (specificDateData.timeSlots && specificDateData.timeSlots.length > 0) {
+        return generateTimeSlotsFromData(specificDateData.timeSlots);
+      }
+    }
+
+    // Fall back to weekly schedule
     const doctorSchedule = doctorAvailability[form.doctor];
-    const daySchedule = doctorSchedule[dayName];
-
-    if (!daySchedule || !daySchedule.enabled) {
-      return []; // Doctor not available on this day
+    if (
+      doctorSchedule &&
+      doctorSchedule[dayName] &&
+      doctorSchedule[dayName].enabled
+    ) {
+      const daySchedule = doctorSchedule[dayName];
+      if (daySchedule.timeSlots && daySchedule.timeSlots.length > 0) {
+        return generateTimeSlotsFromData(daySchedule.timeSlots);
+      }
     }
 
-    // Generate time slots based on doctor's availability
-    const timeSlots = [];
-    if (daySchedule.timeSlots && daySchedule.timeSlots.length > 0) {
-      daySchedule.timeSlots.forEach((slot) => {
-        const startTime = slot.startTime;
-        const endTime = slot.endTime;
-
-        // Generate hourly slots between start and end time
-        const start = parseInt(startTime.split(":")[0]);
-        const end = parseInt(endTime.split(":")[0]);
-
-        for (let hour = start; hour < end; hour++) {
-          const time12 =
-            hour === 0
-              ? "12:00 AM"
-              : hour < 12
-              ? `${hour.toString().padStart(2, "0")}:00 AM`
-              : hour === 12
-              ? "12:00 PM"
-              : `${(hour - 12).toString().padStart(2, "0")}:00 PM`;
-          timeSlots.push(time12);
-        }
-      });
-    }
-
-    return timeSlots;
+    return [];
   };
 
-  // Check if a specific date is available for the selected doctor
-  const isDoctorAvailableOnDate = (year, month, day) => {
-    if (!form.doctor || !doctorAvailability[form.doctor]) {
-      return false;
+  // UPDATED: Modified function to use the new getDoctorSlotsForDate
+  const getDoctorSlots = () => {
+    if (!form.doctor || !form.appointmentDate) {
+      return [];
     }
+    return getDoctorSlotsForDate(form.appointmentDate);
+  };
+
+  // UPDATED: Check if a specific date is available (considering both weekly schedule and specific dates)
+  const isDoctorAvailableOnDate = (year, month, day) => {
+    if (!form.doctor) return false;
+
+    const dateString = `${year}-${String(month + 1).padStart(2, "0")}-${String(
+      day
+    ).padStart(2, "0")}`;
+
+    // Check specific dates first
+    const specificDates = doctorSpecificDates[form.doctor];
+    if (specificDates && specificDates[dateString]) {
+      // If there's specific date data, check if it has time slots
+      const specificDateData = specificDates[dateString];
+      return (
+        specificDateData.timeSlots && specificDateData.timeSlots.length > 0
+      );
+    }
+
+    // Fall back to weekly schedule
+    if (!doctorAvailability[form.doctor]) return false;
 
     const date = new Date(year, month, day);
     const dayOfWeek = date.getDay();
@@ -744,57 +832,19 @@ function PatientBooking() {
     return daySchedule && daySchedule.enabled;
   };
 
-  // FIXED: Check if ALL time slots are booked for a specific date
+  // UPDATED: Check if ALL time slots are booked for a specific date (considering both schedules)
   const isDateFullyBookedForDoctor = (year, month, day) => {
-    if (!form.doctor || !doctorAvailability[form.doctor]) {
-      return false;
-    }
+    if (!form.doctor) return false;
 
-    // Get all available time slots for this date
-    const tempDate = `${year}-${String(month + 1).padStart(2, "0")}-${String(
+    const dateString = `${year}-${String(month + 1).padStart(2, "0")}-${String(
       day
     ).padStart(2, "0")}`;
-    const date = new Date(year, month, day);
-    const dayOfWeek = date.getDay();
-    const dayNames = [
-      "sunday",
-      "monday",
-      "tuesday",
-      "wednesday",
-      "thursday",
-      "friday",
-      "saturday",
-    ];
-    const dayName = dayNames[dayOfWeek];
 
-    const doctorSchedule = doctorAvailability[form.doctor];
-    const daySchedule = doctorSchedule[dayName];
+    // Get all available time slots for this date (considering both specific dates and weekly schedule)
+    const allAvailableSlots = getDoctorSlotsForDate(dateString);
 
-    if (!daySchedule || !daySchedule.enabled) {
-      return true; // If doctor is not available, consider it "fully booked"
-    }
-
-    // Generate all available time slots for this day
-    const allAvailableSlots = [];
-    if (daySchedule.timeSlots && daySchedule.timeSlots.length > 0) {
-      daySchedule.timeSlots.forEach((slot) => {
-        const startTime = slot.startTime;
-        const endTime = slot.endTime;
-        const start = parseInt(startTime.split(":")[0]);
-        const end = parseInt(endTime.split(":")[0]);
-
-        for (let hour = start; hour < end; hour++) {
-          const time12 =
-            hour === 0
-              ? "12:00 AM"
-              : hour < 12
-              ? `${hour.toString().padStart(2, "0")}:00 AM`
-              : hour === 12
-              ? "12:00 PM"
-              : `${(hour - 12).toString().padStart(2, "0")}:00 PM`;
-          allAvailableSlots.push(time12);
-        }
-      });
+    if (allAvailableSlots.length === 0) {
+      return true; // If no slots available, consider it "fully booked"
     }
 
     // Get booked time slots for this specific date
@@ -808,10 +858,7 @@ function PatientBooking() {
       .map((appointment) => appointment.time);
 
     // Check if ALL available slots are booked
-    return (
-      allAvailableSlots.length > 0 &&
-      allAvailableSlots.every((slot) => bookedSlotsForDate.includes(slot))
-    );
+    return allAvailableSlots.every((slot) => bookedSlotsForDate.includes(slot));
   };
 
   const renderDoctorAvatar = () => {
@@ -1255,7 +1302,7 @@ function PatientBooking() {
                       )
                     : true;
 
-                  // FIXED: Check if ALL time slots are booked for this date
+                  // Check if ALL time slots are booked for this date
                   const isFullyBooked = form.doctor
                     ? isDateFullyBookedForDoctor(
                         currentYear,

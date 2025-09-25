@@ -131,11 +131,11 @@ function Login() {
               </div>
             </div>
 
-            {/* Forgot Password Link */}
+            {/* }
             <div className="text-right">
               <button
                 type="button"
-                onClick={() => navigate("/ForgotPassword")}
+                onClick={() => navigate("/forgot-password")}
                 className="text-sm text-indigo-600 hover:text-indigo-500 font-medium transition-colors"
               >
                 Forgot password?

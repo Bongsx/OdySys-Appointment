@@ -26,11 +26,18 @@ function ForgotPassword() {
       return;
     }
 
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
 
     try {
-      // First check if user exists in our database
+      // Check if user exists in our database first
       const usersRef = ref(database, "users");
       const snapshot = await get(usersRef);
 
@@ -41,7 +48,7 @@ function ForgotPassword() {
         const users = snapshot.val();
         // Find user by email
         for (const userId in users) {
-          if (users[userId].email === email) {
+          if (users[userId].email?.toLowerCase() === email.toLowerCase()) {
             userExists = true;
             userData = users[userId];
             break;
@@ -54,43 +61,69 @@ function ForgotPassword() {
         return;
       }
 
-      // Send Firebase password reset email
-      await sendPasswordResetEmail(auth, email);
+      // Configure action code settings to use your custom domain
+      const actionCodeSettings = {
+        // This should point to your Firebase hosting domain with the action handler
+        url: "https://odyssey-test-db.firebaseapp.com/__/auth/action",
+        handleCodeInApp: false, // Set to false since we're using the default Firebase action page
+      };
 
-      // Send custom password reset email via our backend
-      try {
-        await fetch("http://localhost:5000/api/send-password-reset", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email: email,
-            userName: userData
-              ? `${userData.firstName} ${userData.lastName}`
-              : null,
-            resetLink: `https://your-app-domain.com/reset-password`, // Replace with your actual domain
-          }),
-        });
-      } catch (emailError) {
-        console.error("Failed to send custom reset email:", emailError);
-        // Continue even if custom email fails, Firebase email was sent
-      }
+      // Send Firebase password reset email with custom action URL
+      await sendPasswordResetEmail(auth, email, actionCodeSettings);
 
       setSuccess(
         "Password reset instructions have been sent to your email address. Please check your inbox and follow the instructions to reset your password."
       );
       setEmail("");
+
+      // Optional: Send additional custom notification email
+      try {
+        const resetNotificationPayload = {
+          email: email,
+          userName: userData
+            ? `${userData.firstName || ""} ${userData.lastName || ""}`.trim() ||
+              "User"
+            : "User",
+          timestamp: new Date().toISOString(),
+        };
+
+        // Only send if you have a backend endpoint for additional notifications
+        await fetch("http://localhost:5000/api/send-password-reset", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(resetNotificationPayload),
+        });
+      } catch (notificationError) {
+        console.warn("Failed to send notification email:", notificationError);
+        // Don't show error to user since main reset email was sent successfully
+      }
     } catch (err) {
-      console.error(err);
-      if (err.code === "auth/user-not-found") {
-        setError("No account found with this email address");
-      } else if (err.code === "auth/invalid-email") {
-        setError("Invalid email address. Please check your email.");
-      } else if (err.code === "auth/too-many-requests") {
-        setError("Too many requests. Please try again later.");
-      } else {
-        setError("Failed to send reset email. Please try again.");
+      console.error("Password reset error:", err);
+
+      // Handle specific Firebase Auth errors
+      switch (err.code) {
+        case "auth/user-not-found":
+          setError("No account found with this email address");
+          break;
+        case "auth/invalid-email":
+          setError(
+            "Invalid email address. Please check your email and try again."
+          );
+          break;
+        case "auth/too-many-requests":
+          setError(
+            "Too many password reset requests. Please wait before trying again."
+          );
+          break;
+        case "auth/network-request-failed":
+          setError(
+            "Network error. Please check your connection and try again."
+          );
+          break;
+        default:
+          setError("Failed to send reset email. Please try again later.");
       }
     } finally {
       setIsLoading(false);
@@ -153,6 +186,7 @@ function ForgotPassword() {
                   onChange={handleChange}
                   placeholder="Enter your email address"
                   required
+                  autoComplete="email"
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all duration-200 bg-white/50 backdrop-blur-sm"
                 />
               </div>
@@ -199,7 +233,8 @@ function ForgotPassword() {
             </h3>
             <p className="text-xs text-blue-700 leading-relaxed">
               If you don't receive the email within a few minutes, please check
-              your spam folder. Still having trouble? Contact our support team.
+              your spam folder. The reset link will expire in 1 hour for
+              security.
             </p>
           </div>
         </div>

@@ -14,6 +14,40 @@ import {
   UserPlus,
 } from "lucide-react";
 
+// Password strength indicator component
+const PasswordStrengthIndicator = ({ password }) => {
+  const checks = [
+    { test: password.length >= 8, label: "At least 8 characters" },
+    { test: /[A-Z]/.test(password), label: "One uppercase letter" },
+    { test: /[a-z]/.test(password), label: "One lowercase letter" },
+    { test: /\d/.test(password), label: "One number" },
+    {
+      test: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+      label: "One special character",
+    },
+  ];
+
+  return (
+    <div className="mt-2 space-y-1">
+      {checks.map((check, index) => (
+        <div
+          key={index}
+          className={`flex items-center gap-2 text-xs ${
+            check.test ? "text-green-600" : "text-gray-400"
+          }`}
+        >
+          <span
+            className={`w-2 h-2 rounded-full ${
+              check.test ? "bg-green-500" : "bg-gray-300"
+            }`}
+          ></span>
+          {check.label}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 function Signup() {
   const [form, setForm] = useState({
     firstName: "",
@@ -56,6 +90,32 @@ function Signup() {
     setSuccess(null);
   };
 
+  // Enhanced password validation function
+  const validatePassword = (password) => {
+    const minLength = 8;
+    const hasUpperCase = /[A-Z]/.test(password);
+    const hasLowerCase = /[a-z]/.test(password);
+    const hasNumbers = /\d/.test(password);
+    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+
+    if (password.length < minLength) {
+      return "Password must be at least 8 characters long";
+    }
+    if (!hasUpperCase) {
+      return "Password must contain at least one uppercase letter";
+    }
+    if (!hasLowerCase) {
+      return "Password must contain at least one lowercase letter";
+    }
+    if (!hasNumbers) {
+      return "Password must contain at least one number";
+    }
+    if (!hasSpecialChar) {
+      return 'Password must contain at least one special character (!@#$%^&*(),.?":{}|<>)';
+    }
+    return null; // Password is valid
+  };
+
   const validateForm = () => {
     if (!form.firstName.trim()) {
       setError("First name is required");
@@ -81,10 +141,14 @@ function Signup() {
       setError("Contact number must start with 09");
       return false;
     }
-    if (form.password.length < 6) {
-      setError("Password must be at least 6 characters");
+
+    // Enhanced password validation
+    const passwordError = validatePassword(form.password);
+    if (passwordError) {
+      setError(passwordError);
       return false;
     }
+
     if (form.password !== form.confirmPassword) {
       setError("Passwords do not match");
       return false;
@@ -350,6 +414,10 @@ function Signup() {
                   )}
                 </button>
               </div>
+              {/* Password Strength Indicator */}
+              {form.password && (
+                <PasswordStrengthIndicator password={form.password} />
+              )}
             </div>
 
             {/* Confirm Password Input */}

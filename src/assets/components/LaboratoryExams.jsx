@@ -29,6 +29,16 @@ function LaboratoryExams() {
   const navigate = useNavigate();
   const slotRef = useRef(null);
   const newRef = push(ref(database, "clinicLabRequests"));
+  const getCurrentDateTime = () => {
+    const now = new Date();
+    return {
+      date: now.toLocaleDateString("en-CA"), // outputs "YYYY-MM-DD" in local time
+      time: now.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+  };
 
   const [form, setForm] = useState({
     labTestName: "",
@@ -52,13 +62,7 @@ function LaboratoryExams() {
       relation: "",
     },
     patientComplaint: [""],
-    createdAt: {
-      date: new Date().toISOString().split("T")[0],
-      time: new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    },
+    createdAt: getCurrentDateTime(),
   });
 
   const [state, setState] = useState({
@@ -541,13 +545,7 @@ function LaboratoryExams() {
         type: "",
         emergencyContact: { name: "", phone: "", relation: "" },
         patientComplaint: [""],
-        createdAt: {
-          date: new Date().toISOString().split("T")[0],
-          time: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-        },
+        createdAt: getCurrentDateTime(),
       });
 
       setState((prev) => ({

@@ -65,18 +65,17 @@ function Sidebar() {
 
   const appointmentItems = [
     {
-      to: "/PatientBooking",
+      to: "/patient-booking",
       label: "Consultation Booking",
       icon: CalendarDays,
     },
-    { to: "/LaboratoryExams", label: "Laboratory Exams", icon: FlaskConical },
+    { to: "/laboratory-exams", label: "Laboratory Exams", icon: FlaskConical },
   ];
 
   const otherNavItems = [
     { to: "/", label: "Dashboard", icon: BarChart3 },
-    { to: "/patients", label: "Patient Records", icon: Users },
-    { to: "/notifications", label: "Notifications", icon: Bell },
-    { to: "/settings", label: "Settings", icon: Settings },
+    // { to: "/patients", label: "Patient Records", icon: Users },
+    { to: "/FeedBack", label: "Feedback", icon: Users },
   ];
 
   const isAppointmentActive = appointmentItems.some(
