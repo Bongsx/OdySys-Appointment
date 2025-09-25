@@ -23,7 +23,7 @@ const generateWelcomeEmail = ({
   firstName,
   lastName,
   email,
-  phone,
+  contactNumber,
   password,
   createdAt,
 }) => {
@@ -62,7 +62,7 @@ const generateWelcomeEmail = ({
             </tr>
             <tr>
               <td style="padding: 12px 0; border-bottom: 1px solid #f3f4f6; font-weight: 600; color: #374151;">📞 Phone:</td>
-              <td style="padding: 12px 0; border-bottom: 1px solid #f3f4f6; color: #6b7280;">${phone}</td>
+              <td style="padding: 12px 0; border-bottom: 1px solid #f3f4f6; color: #6b7280;">${contactNumber}</td>
             </tr>
             <tr>
               <td style="padding: 12px 0; border-bottom: 1px solid #f3f4f6; font-weight: 600; color: #374151;">🔑 Password:</td>

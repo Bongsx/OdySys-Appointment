@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+node_modules
+/server/api/send-lab-confirmation/index.js
+/server/api/send-password-reset/index.js
+/server/api/send-patient-confirmation/index.js
+/server/api/send-welcome-email/index.js
+/server/.env
+/server/server.js
+/src/assests/firebase/firebase.js
+/src/assests/context/AuthContext.jsx

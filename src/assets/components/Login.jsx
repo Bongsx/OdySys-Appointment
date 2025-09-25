@@ -131,7 +131,7 @@ function Login() {
               </div>
             </div>
 
-            {/* }
+            {/* commented forgot pass}
             <div className="text-right">
               <button
                 type="button"

@@ -16,6 +16,7 @@ import {
   Settings,
   Bell,
   BarChart3,
+  Video,
 } from "lucide-react";
 import { ref, get } from "firebase/database";
 import { database } from "../firebase/firebase";
@@ -63,19 +64,27 @@ function Sidebar() {
     return () => unsubscribe();
   }, []);
 
+  // ✅ Keep sidebar expanded when on Dashboard, Feedback, or PatientReferral
+  useEffect(() => {
+    const mainNavPaths = ["/", "/FeedBack", "/PatientReferral"];
+    if (mainNavPaths.includes(location.pathname)) {
+      setIsCollapsed(false);
+    }
+  }, [location.pathname]);
+
   const appointmentItems = [
     {
       to: "/patient-booking",
       label: "Consultation Booking",
       icon: CalendarDays,
     },
-    { to: "/laboratory-exams", label: "Laboratory Exams", icon: FlaskConical },
   ];
 
   const otherNavItems = [
     { to: "/", label: "Dashboard", icon: BarChart3 },
-    // { to: "/patients", label: "Patient Records", icon: Users },
     { to: "/FeedBack", label: "Feedback", icon: Users },
+    { to: "/PatientReferral", label: "Track Referral Specialist", icon: Users },
+    // { to: "/PatientTeleconsultation", label: "Teleconsultation", icon: Video }, //
   ];
 
   const isAppointmentActive = appointmentItems.some(
@@ -275,7 +284,7 @@ function Sidebar() {
           )}
         </div>
 
-        {/* Remaining Nav Items */}
+        {/* Remaining Nav Items - FeedBack and PatientReferral */}
         {otherNavItems
           .filter((item) => item.to !== "/")
           .map((item) => {

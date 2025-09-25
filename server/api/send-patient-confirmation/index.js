@@ -14,7 +14,7 @@ const transporter = nodemailer.createTransport({
 });
 
 router.post("/", async (req, res) => {
-  const { name, phone, doctor, date, time, email, clinic } = req.body; // <- include email
+  const { name, contactNumber, doctor, date, time, email, clinic } = req.body; // <- include email
 
   const mailOptions = {
     from: `Clinic Booking <${process.env.EMAIL_USER}>`,
@@ -46,7 +46,7 @@ router.post("/", async (req, res) => {
           </tr>
           <tr>
             <td style="padding: 10px; border: 1px solid #ccc;"><strong>📞 Phone:</strong></td>
-            <td style="padding: 10px; border: 1px solid #ccc;">${phone}</td>
+            <td style="padding: 10px; border: 1px solid #ccc;">${contactNumber}</td>
           </tr>
         </table>
 

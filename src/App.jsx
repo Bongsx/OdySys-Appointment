@@ -2,26 +2,22 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Login from "./assets/components/Login";
 import ProtectedRoute from "./assets/components/ProtectedRoute";
 import Dashboard from "./assets/pages/Dashboard";
-import PatientBooking from "./assets/components/PatientBooking";
-import LaboratoryExams from "./assets/components/LaboratoryExams";
-import Signup from "./assets/components/SignUp";
+import PatientBooking from "./assets/components/Patient Consult/PatientBooking";
+import LaboratoryExams from "./assets/components/Laboratory/LaboratoryExams";
 import FeedBack from "./assets/components/FeedBack";
+import Signup from "./assets/components/Signup";
 import ResetPassword from "./assets/components/ResetPassword";
 import ForgotPassword from "./assets/components/ForgotPassowrd";
-
+import PatientReferral from "./assets/components/PatientReferral";
+import PatientTeleconsultation from "./assets/components/PatientTeleconsultation";
 function App() {
   return (
     <Router>
       <Routes>
-        {/* Public routes - no authentication required */}
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />{" "}
-        {/* Changed to lowercase for consistency */}
         <Route path="/forgot-password" element={<ForgotPassword />} />{" "}
-        {/* Changed to kebab-case */}
         <Route path="/reset-password" element={<ResetPassword />} />{" "}
-        {/* Removed ProtectedRoute wrapper */}
-        {/* Protected routes - authentication required */}
         <Route
           path="/"
           element={
@@ -54,7 +50,22 @@ function App() {
             </ProtectedRoute>
           }
         />
-        {/* Catch-all route for 404 - optional but recommended */}
+        <Route
+          path="/PatientReferral"
+          element={
+            <ProtectedRoute>
+              <PatientReferral />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/PatientTeleconsultation"
+          element={
+            <ProtectedRoute>
+              <PatientTeleconsultation />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="*"
           element={
