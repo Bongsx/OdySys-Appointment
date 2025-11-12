@@ -13,8 +13,7 @@ const app = express();
 // Allowed origins
 const allowedOrigins = [
   "https://odysys.netlify.app",
-  "https://odysys-appointment.netlify.app
-",
+  "https://odysys-appointment.netlify.app",
   "http://localhost:3000",
   "http://localhost:5173",
 ];
