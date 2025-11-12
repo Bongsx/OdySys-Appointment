@@ -1,6 +1,8 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
+
+// Import routers
 import sendLabConfirmation from "./api/send-lab-confirmation/index.js";
 import sendPatientConfirmation from "./api/send-patient-confirmation/index.js";
 import sendWelcomeEmail from "./api/send-welcome-email/index.js";
@@ -21,10 +23,8 @@ const allowedOrigins = [
 // CORS configuration
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (like Postman or curl)
+    origin: (origin, callback) => {
       if (!origin) return callback(null, true);
-
       if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -36,25 +36,21 @@ app.use(
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     exposedHeaders: ["Content-Range", "X-Content-Range"],
-    maxAge: 600, // Cache preflight for 10 minutes
+    maxAge: 600,
   })
 );
-
-// Handle preflight requests explicitly
-app.options("*", cors());
 
 // Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
+// Request logging
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  console.log("Origin:", req.headers.origin);
   next();
 });
 
-// Health check endpoint
+// Health check
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
@@ -64,11 +60,23 @@ app.get("/", (req, res) => {
   });
 });
 
-// Original Routes
-app.use("/api/send-lab-confirmation", sendLabConfirmation);
-app.use("/api/send-patient-confirmation", sendPatientConfirmation);
-app.use("/api/send-welcome-email", sendWelcomeEmail);
-app.use("/api/send-password-reset", sendPasswordReset);
+// Helper to safely mount routers
+const mountRouter = (path, router) => {
+  if (!router) {
+    console.error(`❌ Router not found for path: ${path}`);
+  } else if (!router.stack) {
+    console.error(`❌ Invalid router exported at path: ${path}`);
+  } else {
+    app.use(path, router);
+    console.log(`✅ Mounted router at ${path}`);
+  }
+};
+
+// Mount routes safely
+mountRouter("/api/send-lab-confirmation", sendLabConfirmation);
+mountRouter("/api/send-patient-confirmation", sendPatientConfirmation);
+mountRouter("/api/send-welcome-email", sendWelcomeEmail);
+mountRouter("/api/send-password-reset", sendPasswordReset);
 
 // 404 handler
 app.use((req, res) => {
