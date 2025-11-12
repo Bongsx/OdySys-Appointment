@@ -386,7 +386,7 @@ function Signup() {
           `${API_URL}/send-welcome-email`
         );
 
-        const response = await fetch(`${API_URL}/send-welcome-email`, {
+        const response = await fetch(`${API_URL}api/send-welcome-email`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

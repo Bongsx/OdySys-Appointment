@@ -491,7 +491,7 @@ export const usePatientBooking = () => {
       try {
         const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-        await fetch(`${API_URL}/send-patient-confirmation`, {
+        await fetch(`${API_URL}api/send-patient-confirmation`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
