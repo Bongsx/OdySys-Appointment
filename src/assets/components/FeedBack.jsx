@@ -832,7 +832,6 @@ function Feedback() {
               <h1 className="text-3xl font-bold text-center flex-1">
                 Share Your Feedback
               </h1>
-              <div className="w-40"></div>
             </div>
             <p className="text-center text-purple-100 mt-2">
               Help us improve our services with your valuable feedback

@@ -46,6 +46,7 @@ export const usePatientBooking = () => {
 
   // UI states
   const [submitting, setSubmitting] = useState(false);
+  const [successModal, setSuccessModal] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
@@ -471,7 +472,7 @@ export const usePatientBooking = () => {
         additionalNotes: form.additionalNotes,
         appointmentDate: form.appointmentDate,
         appointmentTime: form.appointmentTime,
-        appointmentPurpose: "General Consultation",
+        appointmentPurpose: form.serviceFee.name,
         clinicId: form.clinicId,
         clinicName: form.clinicName,
         contactNumber: form.contactNumber,
@@ -488,7 +489,9 @@ export const usePatientBooking = () => {
 
       // Email notification
       try {
-        await fetch("http://localhost:5000/api/send-patient-confirmation", {
+        const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
+        await fetch(`${API_URL}/send-patient-confirmation`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -505,7 +508,7 @@ export const usePatientBooking = () => {
         console.warn("Email notification failed:", emailError);
       }
 
-      alert("✅ Appointment booked successfully!");
+      setSuccessModal(true);
 
       // Reset form
       setForm({
@@ -541,6 +544,7 @@ export const usePatientBooking = () => {
     bookedTimes,
     selectedDoctor,
     submitting,
+    successModal,
     loadingData,
     loading,
     errors,
@@ -552,6 +556,7 @@ export const usePatientBooking = () => {
 
     // Actions
     setViewMonthOffset,
+    setSuccessModal,
     handleChange,
     handlePhone,
     addComplaint,

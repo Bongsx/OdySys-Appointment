@@ -377,7 +377,16 @@ function Signup() {
       await set(ref(database, `patients/${user.uid}`), patientData);
 
       try {
-        await fetch("http://localhost:5000/api/send-welcome-email", {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout
+
+        const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+        console.log(
+          "Sending email request to:",
+          `${API_URL}/send-welcome-email`
+        );
+
+        const response = await fetch(`${API_URL}/send-welcome-email`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -388,9 +397,37 @@ function Signup() {
             password: form.password,
             createdAt: now,
           }),
+          signal: controller.signal,
         });
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          console.log("✅ Welcome email sent successfully.");
+        } else {
+          let errorMessage = "Unknown error while sending email.";
+          try {
+            const errorData = await response.json();
+            errorMessage = errorData.error || errorData.details || errorMessage;
+            console.error("Mailjet email error:", errorData);
+          } catch {
+            errorMessage = `Server error (${response.status})`;
+          }
+          console.warn(`⚠️ Email sending failed: ${errorMessage}`);
+        }
       } catch (emailError) {
         console.error("Failed to send welcome email:", emailError);
+
+        if (emailError.name === "AbortError") {
+          console.warn(
+            "⏱️ Email request timed out (server may be starting up)."
+          );
+        } else if (
+          emailError.name === "TypeError" &&
+          emailError.message.includes("fetch")
+        ) {
+          console.warn("⚠️ Email service unavailable (network issue).");
+        }
       }
 
       setSuccess(

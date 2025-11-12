@@ -340,7 +340,6 @@ function PatientReferral() {
               <h1 className="text-3xl font-bold text-center flex-1">
                 My Referrals
               </h1>
-              <div className="w-40"></div>
             </div>
             <p className="text-center text-purple-100 mt-2">
               Track your specialist referrals and appointment status

@@ -245,7 +245,6 @@ const PatientTeleconsultation = () => {
               <h1 className="text-3xl font-bold text-center flex-1">
                 My Teleconsultations
               </h1>
-              <div className="w-40"></div>
             </div>
             <p className="text-center text-purple-100 mt-2">
               Manage and join your virtual medical appointments

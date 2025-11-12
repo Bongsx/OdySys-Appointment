@@ -12,6 +12,7 @@ import {
   Plus,
   Stethoscope,
 } from "lucide-react";
+import SuccessModal from "./SuccessModal";
 
 import { usePatientBooking } from "./usePatientBooking";
 import {
@@ -30,6 +31,7 @@ function PatientBooking() {
     doctorList,
     selectedDoctor,
     submitting,
+    successModal,
     loadingData,
     loading,
     errors,
@@ -43,6 +45,7 @@ function PatientBooking() {
 
     // Actions
     setViewMonthOffset,
+    setSuccessModal,
     handleChange,
     handlePhone,
     addComplaint,
@@ -165,7 +168,8 @@ function PatientBooking() {
   const handleFormSubmit = async () => {
     const success = await handleSubmit();
     if (success) {
-      navigate("/");
+      // ✅ Show modal instead of navigating immediately
+      setSuccessModal(true);
     }
   };
 
@@ -588,7 +592,7 @@ function PatientBooking() {
                 ))}
               </select>
 
-              {/* Consultation Type */}
+              {/* Consultation Type 
               <div className="flex items-center space-x-2 mb-3">
                 <Stethoscope className="w-5 h-5 text-gray-600" />
                 <label className="text-sm font-medium text-gray-700">
@@ -617,7 +621,7 @@ function PatientBooking() {
                   💡 This field will be automatically filled when you select a
                   service fee below
                 </p>
-              )}
+              )} */}
 
               {/* Service Fee Dropdown */}
               <div className="flex items-center space-x-2 mb-3">
@@ -735,6 +739,15 @@ function PatientBooking() {
           )}
         </button>
       </div>
+
+      {/* ✅ Success modal */}
+      <SuccessModal
+        isOpen={successModal}
+        onClose={() => {
+          setSuccessModal(false);
+          navigate("/"); // ✅ Navigate only after closing modal
+        }}
+      />
     </div>
   );
 }

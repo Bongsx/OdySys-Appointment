@@ -1,4 +1,3 @@
-// src/pages/Dashboard.jsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ref, onValue } from "firebase/database";
@@ -14,17 +13,17 @@ import {
   Loader,
   UserCheck,
   Stethoscope,
+  Activity as ActivityIcon,
 } from "lucide-react";
 
 function Dashboard() {
   const navigate = useNavigate();
-  const [selectedOption, setSelectedOption] = useState("booking");
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [allAppointments, setAllAppointments] = useState([]);
   const [allReferrals, setAllReferrals] = useState([]);
-
-  // Dynamic patient data based on appointments and referrals
+  const [allTransactions, setAllTransactions] = useState([]);
+  const [clinicsData, setClinicsData] = useState({});
   const [patientData, setPatientData] = useState({
     upcomingAppointments: 0,
     pendingResults: 0,
@@ -33,8 +32,9 @@ function Dashboard() {
     activeReferrals: 0,
     completedReferrals: 0,
   });
-
   const [recentActivity, setRecentActivity] = useState([]);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [filteredActivity, setFilteredActivity] = useState([]);
 
   useEffect(() => {
     const userData = JSON.parse(localStorage.getItem("user"));
@@ -43,506 +43,380 @@ function Dashboard() {
       return;
     }
     setUser(userData);
-
-    // Fetch all appointment and referral data
-    fetchAllAppointmentData(userData);
+    fetchAllData(userData);
   }, [navigate]);
 
-  // Enhanced user matching function for referrals
-  const isReferralMatch = (referralData, currentUser, usersData) => {
-    const currentUserEmail = currentUser.email?.toLowerCase();
-    const currentUserUID =
-      currentUser.uid || currentUser.userId || currentUser.id;
+  const filterActivity = (activities) => {
+    let filtered;
+    switch (activeFilter) {
+      case "upcoming":
+        filtered = activities.filter((activity) =>
+          [
+            "pending",
+            "confirmed",
+            "scheduled",
+            "requested",
+            "approved",
+            "processing",
+            "in_progress",
+          ].includes(activity.status?.toLowerCase())
+        );
+        break;
+      case "pending":
+        filtered = activities.filter(
+          (activity) => activity.status?.toLowerCase() === "pending"
+        );
+        break;
+      case "completed":
+        filtered = activities.filter((activity) =>
+          ["completed", "done", "finished", "results_ready"].includes(
+            activity.status?.toLowerCase()
+          )
+        );
+        break;
+      case "referrals":
+        const allReferrals = activities.filter(
+          (activity) => activity.activityType === "referral"
+        );
+        console.log(
+          "All referral activities:",
+          allReferrals.map((r) => ({
+            id: r.id,
+            status: r.status,
+            activityType: r.activityType,
+          }))
+        );
 
-    console.log("=== REFERRAL MATCHING DEBUG ===");
-    console.log("Current User Info:", {
-      email: currentUserEmail,
-      uid: currentUserUID,
-      firstName: currentUser.firstName,
-      lastName: currentUser.lastName,
-      fullUser: currentUser,
-    });
-    console.log("Referral Data:", {
-      id: referralData.id || "unknown",
-      patientId: referralData.patientId,
-      patientFirstName: referralData.patientFirstName,
-      patientLastName: referralData.patientLastName,
-      patientMiddleName: referralData.patientMiddleName,
-      status: referralData.status,
-      fullReferral: referralData,
-    });
+        filtered = activities.filter(
+          (activity) =>
+            activity.activityType === "referral" &&
+            [
+              "pending",
+              "confirmed",
+              "scheduled",
+              "requested",
+              "approved",
+              "active",
+            ].includes(activity.status?.toLowerCase())
+        );
+        console.log(
+          "Filtered active referrals:",
+          filtered.map((r) => ({ id: r.id, status: r.status }))
+        );
+        break;
+      case "referrals-completed":
+        filtered = activities.filter(
+          (activity) =>
+            activity.activityType === "referral" &&
+            ["completed", "done", "finished"].includes(
+              activity.status?.toLowerCase()
+            )
+        );
+        break;
+      case "all":
+      default:
+        filtered = activities;
+    }
 
-    // Primary matching - Patient ID (most reliable)
-    const patientUIDs = [
-      referralData.patientId,
-      referralData.patientUID,
-      referralData.userId,
-      referralData.assignedSpecialistId, // Sometimes this might be the patient ID in error
-    ].filter(Boolean);
-
-    console.log("Found Patient UIDs in referral:", patientUIDs);
-    const uidMatch = patientUIDs.some((uid) => uid === currentUserUID);
     console.log(
-      "UID Match:",
-      uidMatch,
-      `(${currentUserUID} in [${patientUIDs.join(", ")}])`
+      `Filter '${activeFilter}' applied. Total activities: ${activities.length}, Filtered: ${filtered.length}`
     );
-
-    // Secondary matching - Name matching (case-insensitive)
-    let nameMatch = false;
-    const currentUserFirstName = (currentUser.firstName || "")
-      .toLowerCase()
-      .trim();
-    const currentUserLastName = (currentUser.lastName || "")
-      .toLowerCase()
-      .trim();
-    const referralFirstName = (referralData.patientFirstName || "")
-      .toLowerCase()
-      .trim();
-    const referralLastName = (referralData.patientLastName || "")
-      .toLowerCase()
-      .trim();
-
-    console.log("Name comparison:", {
-      currentUser: `${currentUserFirstName} ${currentUserLastName}`,
-      referralPatient: `${referralFirstName} ${referralLastName}`,
-    });
-
-    if (
-      currentUserFirstName &&
-      currentUserLastName &&
-      referralFirstName &&
-      referralLastName
-    ) {
-      nameMatch =
-        currentUserFirstName === referralFirstName &&
-        currentUserLastName === referralLastName;
-      console.log("Direct name match:", nameMatch);
-    }
-
-    // Tertiary matching - Cross-reference with users node
-    let userNodeMatch = false;
-    if (!uidMatch && !nameMatch && usersData) {
-      console.log("Checking users node for additional verification...");
-
-      // Get current user from DB
-      const currentUserFromDB = usersData[currentUserUID];
-      console.log("Current user from DB:", currentUserFromDB);
-
-      if (currentUserFromDB) {
-        const dbFirstName = (currentUserFromDB.firstName || "")
-          .toLowerCase()
-          .trim();
-        const dbLastName = (currentUserFromDB.lastName || "")
-          .toLowerCase()
-          .trim();
-
-        if (
-          dbFirstName &&
-          dbLastName &&
-          referralFirstName &&
-          referralLastName
-        ) {
-          userNodeMatch =
-            dbFirstName === referralFirstName &&
-            dbLastName === referralLastName;
-          console.log(
-            "DB name match:",
-            userNodeMatch,
-            `DB: ${dbFirstName} ${dbLastName}, Referral: ${referralFirstName} ${referralLastName}`
-          );
-        }
-      }
-
-      // Also check if patientId exists in users node and matches current user
-      if (referralData.patientId && usersData[referralData.patientId]) {
-        const patientFromDB = usersData[referralData.patientId];
-        if (patientFromDB.email?.toLowerCase() === currentUserEmail) {
-          userNodeMatch = true;
-          console.log("Patient ID email match found in users node");
-        }
-      }
-    }
-
-    // Quaternary matching - Email cross-reference (if available in referral)
-    let emailMatch = false;
-    if (currentUserEmail && usersData) {
-      // Check if the patientId in referral corresponds to a user with matching email
-      if (referralData.patientId && usersData[referralData.patientId]) {
-        const patientUser = usersData[referralData.patientId];
-        if (patientUser.email?.toLowerCase() === currentUserEmail) {
-          emailMatch = true;
-          console.log("Email match via patientId lookup:", emailMatch);
-        }
-      }
-    }
-
-    const isMatch = uidMatch || nameMatch || userNodeMatch || emailMatch;
-    console.log("MATCH RESULTS:", {
-      uidMatch,
-      nameMatch,
-      userNodeMatch,
-      emailMatch,
-      finalResult: isMatch,
-    });
-    console.log("FINAL REFERRAL MATCH RESULT:", isMatch);
-    console.log("===============================");
-
-    return isMatch;
+    return filtered;
   };
 
-  // User matching function with enhanced logging (keeping existing)
-  const isUserMatch = (appointmentData, currentUser, usersData) => {
+  useEffect(() => {
+    setFilteredActivity(filterActivity(recentActivity));
+  }, [activeFilter, recentActivity]);
+
+  const isUserMatch = (item, currentUser) => {
+    const currentUserIds = [
+      currentUser.uid,
+      currentUser.userId,
+      currentUser.id,
+      currentUser.patientId,
+    ].filter(Boolean);
+
     const currentUserEmail = currentUser.email?.toLowerCase();
-    const currentUserUID =
-      currentUser.uid || currentUser.userId || currentUser.id;
 
-    console.log("=== USER MATCHING DEBUG ===");
-    console.log("Current User Info:", {
-      email: currentUserEmail,
-      uid: currentUserUID,
-      fullUser: currentUser,
-    });
-    console.log("Appointment/Lab Data:", {
-      id: appointmentData.id || "unknown",
-      patientId: appointmentData.patientId,
-      doctorId: appointmentData.doctorId,
-      clinicId: appointmentData.clinicId,
-      type: appointmentData.type,
-      status: appointmentData.status,
-      appointmentPurpose: appointmentData.appointmentPurpose,
-      fullAppointment: appointmentData,
-    });
-
-    // Primary matching - Firebase Auth UID (most reliable)
-    const appointmentUIDs = [
-      appointmentData.uid,
-      appointmentData.userId,
-      appointmentData.patientUID,
-      appointmentData.patientId,
-      appointmentData.patient?.uid,
-      appointmentData.patient?.userId,
-      appointmentData.createdBy?.uid,
-      appointmentData.createdBy?.userId,
-      appointmentData.userRef,
-      appointmentData.patientRef,
-      appointmentData.createdByRef,
+    const itemIds = [
+      item.uid,
+      item.userId,
+      item.patientUID,
+      item.patientId,
+      item.assignedSpecialistId,
+      item.referringGeneralistId,
+      item.patient?.uid,
+      item.createdBy?.uid,
     ].filter(Boolean);
 
-    console.log("Found UIDs in appointment:", appointmentUIDs);
-    const uidMatch = appointmentUIDs.some((uid) => uid === currentUserUID);
-    console.log(
-      "UID Match:",
-      uidMatch,
-      `(${currentUserUID} in [${appointmentUIDs.join(", ")}])`
-    );
+    const itemEmails = [
+      item.email,
+      item.patientEmail,
+      item.patient?.email,
+      item.createdBy?.email,
+    ]
+      .filter(Boolean)
+      .map((email) => email.toLowerCase());
 
-    // Secondary matching - Email matching
-    const appointmentEmails = [
-      appointmentData.email?.toLowerCase(),
-      appointmentData.patientEmail?.toLowerCase(),
-      appointmentData.patient?.email?.toLowerCase(),
-      appointmentData.createdBy?.email?.toLowerCase(),
-    ].filter(Boolean);
-
-    console.log("Found emails in appointment:", appointmentEmails);
+    const idMatch = currentUserIds.some((id) => itemIds.includes(id));
     const emailMatch =
-      currentUserEmail && appointmentEmails.includes(currentUserEmail);
-    console.log(
-      "Email Match:",
-      emailMatch,
-      `(${currentUserEmail} in [${appointmentEmails.join(", ")}])`
-    );
+      currentUserEmail && itemEmails.includes(currentUserEmail);
 
-    // Tertiary matching - Cross-reference with users node
-    let userNodeMatch = false;
-    if (!uidMatch && appointmentEmails.length > 0 && usersData) {
-      Object.keys(usersData).forEach((userUID) => {
-        const userData = usersData[userUID];
-        if (
-          userData.email?.toLowerCase() === currentUserEmail &&
-          appointmentEmails.includes(userData.email?.toLowerCase())
-        ) {
-          userNodeMatch = true;
-        }
-      });
-    }
-    console.log("User Node Match:", userNodeMatch);
-
-    const isMatch = uidMatch || emailMatch || userNodeMatch;
-    console.log("FINAL MATCH RESULT:", isMatch);
-    console.log("=========================");
-
-    return isMatch;
+    return idMatch || emailMatch;
   };
 
-  const fetchAllAppointmentData = (userData) => {
+  const fetchAllData = (userData) => {
     setLoading(true);
 
-    console.log("Fetching data for user:", {
-      email: userData.email,
-      uid: userData.uid || userData.userId || userData.id,
-      fullUserData: userData,
-    });
+    const dataRefs = {
+      users: ref(database, "users"),
+      appointments: ref(database, "appointments"),
+      clinicLabRequests: ref(database, "clinicLabRequests"),
+      referrals: ref(database, "referrals"),
+      medicalServicesTransactions: ref(database, "medicalServicesTransactions"),
+      clinics: ref(database, "clinics"),
+    };
 
-    // Fetch all data sources
-    const usersRef = ref(database, "users");
-    const appointmentsRef = ref(database, "appointments");
-    const clinicLabRequestsRef = ref(database, "clinicLabRequests");
-    const referralsRef = ref(database, "referrals");
+    let loadedData = {};
+    let loadCount = 0;
+    const totalLoads = Object.keys(dataRefs).length;
 
-    let usersData = null;
-    let appointmentsData = null;
-    let clinicLabData = null;
-    let referralsData = null;
-    let dataLoadCount = 0;
+    const processData = () => {
+      if (loadCount === totalLoads) {
+        setClinicsData(loadedData.clinics || {});
 
-    const processAllData = () => {
-      if (dataLoadCount === 4) {
-        // Updated to 4 for referrals
         const userAppointments = [];
         const userReferrals = [];
+        const userTransactions = [];
 
-        // Get current user's complete data from users node
-        let currentUserFromDB = null;
-        if (usersData && userData.uid) {
-          currentUserFromDB =
-            usersData[userData.uid] ||
-            Object.values(usersData).find(
-              (user) =>
-                user.email?.toLowerCase() === userData.email?.toLowerCase()
-            );
-        }
+        console.log("=== DATA PROCESSING DEBUG ===");
+        console.log(
+          "Raw referrals data:",
+          Object.keys(loadedData.referrals || {}).length
+        );
+        console.log(
+          "Raw transactions data:",
+          Object.keys(loadedData.medicalServicesTransactions || {}).length
+        );
+        console.log("Current user for matching:", {
+          uid: userData.uid,
+          email: userData.email,
+          firstName: userData.firstName,
+          patientId: userData.patientId,
+        });
 
-        console.log("Current user from DB:", currentUserFromDB);
-        const userForMatching = currentUserFromDB || userData;
-
-        // Process direct appointments (consultations) - keeping existing logic
-        if (appointmentsData) {
-          Object.keys(appointmentsData).forEach((key) => {
-            const appointment = appointmentsData[key];
-
-            if (isUserMatch(appointment, userForMatching, usersData)) {
-              console.log("Found matching appointment:", key, appointment);
-
-              userAppointments.push({
-                id: key,
-                type: "consultation",
-                ...appointment,
-                testName:
-                  appointment.type ||
-                  appointment.serviceType ||
-                  "General Consultation",
-                doctor:
-                  appointment.doctor || appointment.doctorName || "Doctor",
-                patientName:
-                  `${
-                    appointment.patient?.firstName ||
-                    appointment.firstName ||
-                    ""
-                  } ${
-                    appointment.patient?.lastName || appointment.lastName || ""
-                  }`.trim() || appointment.patientName,
-                scheduledDateTime:
-                  appointment.appointmentDate && appointment.appointmentTime
-                    ? `${appointment.appointmentDate}T${convertTo24Hour(
-                        appointment.appointmentTime
-                      )}`
-                    : appointment.scheduledDateTime || new Date().toISOString(),
-                email: appointment.patient?.email || appointment.email,
-                source: "appointments",
-                clinicName: appointment.clinicName || appointment.clinic,
-                serviceFee: normalizeServiceFee(appointment.serviceFee),
-              });
+        Object.entries(loadedData.appointments || {}).forEach(
+          ([key, appointment]) => {
+            if (isUserMatch(appointment, userData)) {
+              userAppointments.push(
+                createAppointmentItem(key, appointment, "consultation")
+              );
             }
-          });
-        }
+          }
+        );
 
-        // Process clinic lab requests - keeping existing logic
-        if (clinicLabData) {
-          Object.keys(clinicLabData).forEach((key) => {
-            const labRequest = clinicLabData[key];
-
-            if (isUserMatch(labRequest, userForMatching, usersData)) {
-              console.log("Found matching lab request:", key, labRequest);
-
-              userAppointments.push({
-                id: key,
-                type: "clinic_lab_request",
-                ...labRequest,
-                testName:
-                  labRequest.labTestName || labRequest.testName || "Lab Test",
-                doctor:
-                  labRequest.referDoctor ||
-                  labRequest.doctor ||
-                  "Laboratory Staff",
-                patientName:
-                  labRequest.patientName ||
-                  `${labRequest.firstName || ""} ${
-                    labRequest.lastName || ""
-                  }`.trim(),
-                scheduledDateTime:
-                  labRequest.createdAt?.date && labRequest.estimatedTime
-                    ? `${labRequest.createdAt.date}T${convertTo24Hour(
-                        labRequest.estimatedTime
-                      )}`
-                    : labRequest.scheduledDateTime || new Date().toISOString(),
-                source: "Clinic Lab Requests",
-                clinicName: labRequest.clinic || labRequest.clinicName,
-                serviceFee: normalizeServiceFee(labRequest.serviceFee),
-                bloodType: labRequest.bloodType,
-                description: labRequest.description,
-                slotNumber: labRequest.slotNumber,
-                contactNumber: labRequest.contactNumber,
-                dateOfBirth: labRequest.dateOfBirth,
-              });
+        Object.entries(loadedData.clinicLabRequests || {}).forEach(
+          ([key, labRequest]) => {
+            if (isUserMatch(labRequest, userData)) {
+              userAppointments.push(
+                createAppointmentItem(key, labRequest, "clinic_lab_request")
+              );
             }
-          });
-        }
+          }
+        );
 
-        // Process referrals - NEW
-        if (referralsData) {
-          Object.keys(referralsData).forEach((key) => {
-            const referral = referralsData[key];
+        Object.entries(loadedData.referrals || {}).forEach(
+          ([key, referral]) => {
+            console.log(`Checking referral ${key}:`, {
+              patientId: referral.patientId,
+              assignedSpecialistId: referral.assignedSpecialistId,
+              referringGeneralistId: referral.referringGeneralistId,
+              patientFirstName: referral.patientFirstName,
+              patientLastName: referral.patientLastName,
+              status: referral.status,
+            });
 
-            if (isReferralMatch(referral, userForMatching, usersData)) {
-              console.log("Found matching referral:", key, referral);
+            const matches = isUserMatch(referral, userData);
+            console.log(`Referral ${key} matches user:`, matches);
 
-              const scheduledDateTime = referral.appointmentTime
-                ? `${new Date().toISOString().split("T")[0]}T${convertTo24Hour(
-                    referral.appointmentTime
-                  )}`
-                : referral.referralTimestamp || new Date().toISOString();
-
-              userReferrals.push({
-                id: key,
-                type: "referral",
-                ...referral,
-                testName:
-                  referral.initialReasonForReferral || "Specialist Referral",
-                doctor:
-                  `Dr. ${referral.assignedSpecialistFirstName || ""} ${
-                    referral.assignedSpecialistLastName || ""
-                  }`.trim() || "Specialist",
-                referringDoctor: `Dr. ${
-                  referral.referringGeneralistFirstName || ""
-                } ${referral.referringGeneralistLastName || ""}`.trim(),
-                patientName: `${referral.patientFirstName || ""} ${
-                  referral.patientMiddleName || ""
-                } ${referral.patientLastName || ""}`.trim(),
-                scheduledDateTime: scheduledDateTime,
-                source: "referrals",
-                clinicName:
-                  referral.referringClinicName ||
-                  referral.practiceLocation ||
-                  "Clinic",
-                appointmentTime: referral.appointmentTime,
-                lastUpdated: referral.lastUpdated,
-                generalistNotes: referral.generalistNotes,
-                patientArrivalConfirmed: referral.patientArrivalConfirmed,
-                sourceSystem: referral.sourceSystem,
-              });
+            if (matches) {
+              userReferrals.push(createReferralItem(key, referral));
+              console.log(`Added referral ${key} to user referrals`);
             }
-          });
-        }
+          }
+        );
 
-        console.log("Final filtered appointments for user:", userAppointments);
-        console.log("Final filtered referrals for user:", userReferrals);
+        Object.entries(loadedData.medicalServicesTransactions || {}).forEach(
+          ([key, transaction]) => {
+            const matches = isUserMatch(transaction, userData);
+            if (matches) {
+              userTransactions.push(
+                createTransactionItem(
+                  key,
+                  transaction,
+                  loadedData.clinics || {}
+                )
+              );
+              console.log(`Added transaction ${key} to user transactions`);
+            }
+          }
+        );
+
+        console.log("Final counts:", {
+          appointments: userAppointments.length,
+          referrals: userReferrals.length,
+          transactions: userTransactions.length,
+        });
+        console.log(
+          "User referrals:",
+          userReferrals.map((r) => ({
+            id: r.id,
+            status: r.status,
+            testName: r.testName,
+          }))
+        );
+        console.log("================================");
 
         setAllAppointments(userAppointments);
         setAllReferrals(userReferrals);
-        calculatePatientStats(userAppointments, userReferrals);
-        generateRecentActivity(userAppointments, userReferrals);
+        setAllTransactions(userTransactions);
+        calculateStats(userAppointments, userReferrals, userTransactions);
+        generateActivity(userAppointments, userReferrals, userTransactions);
         setLoading(false);
       }
     };
 
-    // Listen to users data
-    onValue(
-      usersRef,
-      (snapshot) => {
-        usersData = snapshot.val() || {};
-        console.log(
-          "Users data loaded:",
-          Object.keys(usersData).length,
-          "users"
-        );
-        dataLoadCount++;
-        processAllData();
-      },
-      (error) => {
-        console.error("Error fetching users:", error);
-        usersData = {};
-        dataLoadCount++;
-        processAllData();
-      }
-    );
+    Object.entries(dataRefs).forEach(([key, dbRef]) => {
+      onValue(
+        dbRef,
+        (snapshot) => {
+          loadedData[key] = snapshot.val() || {};
+          loadCount++;
+          processData();
+        },
+        (error) => {
+          console.error(`Error fetching ${key}:`, error);
+          loadedData[key] = {};
+          loadCount++;
+          processData();
+        }
+      );
+    });
+  };
 
-    // Listen to appointments
-    onValue(
-      appointmentsRef,
-      (snapshot) => {
-        appointmentsData = snapshot.val() || {};
-        console.log(
-          "Raw appointments data:",
-          Object.keys(appointmentsData).length,
-          "appointments"
-        );
-        dataLoadCount++;
-        processAllData();
-      },
-      (error) => {
-        console.error("Error fetching appointments:", error);
-        appointmentsData = {};
-        dataLoadCount++;
-        processAllData();
-      }
-    );
+  const createAppointmentItem = (id, data, type) => {
+    const testName =
+      data.labTestName ||
+      data.testName ||
+      data.type ||
+      data.serviceType ||
+      data.appointmentPurpose ||
+      "General Consultation";
 
-    // Listen to clinic lab requests
-    onValue(
-      clinicLabRequestsRef,
-      (snapshot) => {
-        clinicLabData = snapshot.val() || {};
-        console.log(
-          "Raw clinic lab data:",
-          Object.keys(clinicLabData).length,
-          "lab requests"
-        );
-        dataLoadCount++;
-        processAllData();
-      },
-      (error) => {
-        console.error("Error fetching clinic lab requests:", error);
-        clinicLabData = {};
-        dataLoadCount++;
-        processAllData();
-      }
-    );
+    const doctor =
+      data.referDoctor ||
+      data.doctor ||
+      data.doctorName ||
+      (type === "clinic_lab_request" ? "Laboratory Staff" : "Doctor");
 
-    // Listen to referrals - NEW
-    onValue(
-      referralsRef,
-      (snapshot) => {
-        referralsData = snapshot.val() || {};
-        console.log(
-          "Raw referrals data:",
-          Object.keys(referralsData).length,
-          "referrals"
-        );
-        dataLoadCount++;
-        processAllData();
-      },
-      (error) => {
-        console.error("Error fetching referrals:", error);
-        referralsData = {};
-        dataLoadCount++;
-        processAllData();
-      }
+    const patientName =
+      data.patientName ||
+      `${data.firstName || ""} ${data.lastName || ""}`.trim() ||
+      `${data.patient?.firstName || ""} ${data.patient?.lastName || ""}`.trim();
+
+    return {
+      id,
+      type,
+      ...data,
+      testName,
+      doctor,
+      patientName,
+      scheduledDateTime: getScheduledDateTime(data),
+      source:
+        type === "clinic_lab_request" ? "Clinic Lab Requests" : "appointments",
+      clinicName: data.clinicName || data.clinic,
+      serviceFee: normalizeServiceFee(data.serviceFee),
+      status: data.status || "requested",
+    };
+  };
+
+  const createReferralItem = (id, data) => {
+    const doctor =
+      `Dr. ${data.assignedSpecialistFirstName || ""} ${
+        data.assignedSpecialistLastName || ""
+      }`.trim() || "Specialist";
+    const referringDoctor = `Dr. ${data.referringGeneralistFirstName || ""} ${
+      data.referringGeneralistLastName || ""
+    }`.trim();
+    const patientName = `${data.patientFirstName || ""} ${
+      data.patientMiddleName || ""
+    } ${data.patientLastName || ""}`.trim();
+
+    return {
+      id,
+      type: "referral",
+      ...data,
+      testName: data.initialReasonForReferral || "Specialist Referral",
+      doctor,
+      referringDoctor,
+      patientName,
+      scheduledDateTime: getScheduledDateTime(data),
+      source: "referrals",
+      clinicName: data.referringClinicName || data.practiceLocation || "Clinic",
+      status: data.status || "pending",
+    };
+  };
+
+  const createTransactionItem = (id, data, clinicsData) => {
+    const scheduledDate = data.labTestSched?.date;
+    const scheduledTime = data.labTestSched?.time;
+    const mainStatus = data.resultStatus || data.sampleStatus || "processing";
+    const testName = data.serviceCategory || data.department || "Lab Service";
+
+    const clinicId = data.clinicId;
+    const clinicName =
+      clinicsData[clinicId]?.name || clinicId || "Unknown Clinic";
+
+    return {
+      id,
+      type: "medical_transaction",
+      ...data,
+      testName,
+      patientName: data.patientName,
+      doctor: data.completedBy || "Lab Staff",
+      status: mainStatus,
+      scheduledDateTime: getScheduledDateTime({
+        appointmentDate: scheduledDate,
+        appointmentTime: scheduledTime,
+        createdAt: data.createdAt,
+        status: mainStatus,
+      }),
+      source: "Medical Transactions",
+      clinicName: clinicName,
+      serviceFee: normalizeServiceFee(data.serviceFee),
+      labTestSched: data.labTestSched,
+    };
+  };
+
+  const getScheduledDateTime = (data) => {
+    if (data.appointmentDate && data.appointmentTime) {
+      return `${data.appointmentDate}T${convertTo24Hour(data.appointmentTime)}`;
+    }
+    if (
+      data.completedAt &&
+      ["completed", "results_ready"].includes(data.status?.toLowerCase())
+    ) {
+      return data.completedAt;
+    }
+
+    return (
+      data.scheduledDateTime ||
+      data.createdAt ||
+      data.referralTimestamp ||
+      new Date().toISOString()
     );
   };
 
-  // Helper function to normalize service fee
   const normalizeServiceFee = (serviceFee) => {
     if (typeof serviceFee === "object" && serviceFee !== null) {
       return serviceFee.fee || serviceFee.name || serviceFee.amount || "N/A";
@@ -550,11 +424,9 @@ function Dashboard() {
     return serviceFee || "N/A";
   };
 
-  // Helper function to convert time to 24-hour format
   const convertTo24Hour = (timeStr) => {
     if (!timeStr) return "00:00";
 
-    // Handle already 24-hour format or ranges like "8:00AM - 9:00AM"
     if (timeStr.includes("-")) {
       timeStr = timeStr.split("-")[0].trim();
     }
@@ -564,7 +436,6 @@ function Dashboard() {
     if (time.includes("am") || time.includes("pm")) {
       const [timePart] = time.split(/[ap]m/);
       let [hours, minutes = "00"] = timePart.split(":");
-
       hours = parseInt(hours);
 
       if (time.includes("pm") && hours !== 12) {
@@ -579,293 +450,311 @@ function Dashboard() {
     return timeStr.includes(":") ? timeStr : "00:00";
   };
 
-  // Enhanced stats calculation including referrals
-  const calculatePatientStats = (appointmentsList, referralsList) => {
+  const calculateStats = (appointments, referrals, transactions) => {
     const stats = {
       upcomingAppointments: 0,
       pendingResults: 0,
       completedTests: 0,
-      totalVisits: appointmentsList.length + referralsList.length,
+      totalVisits: appointments.length + referrals.length + transactions.length,
       activeReferrals: 0,
       completedReferrals: 0,
     };
 
-    console.log("Calculating stats for appointments:", appointmentsList);
-    console.log("Calculating stats for referrals:", referralsList);
+    const upcomingStatuses = [
+      "pending",
+      "confirmed",
+      "scheduled",
+      "requested",
+      "approved",
+      "processing",
+      "in_progress",
+    ];
+    const completedStatuses = [
+      "completed",
+      "done",
+      "finished",
+      "results_ready",
+    ];
 
-    // Process appointments (existing logic)
-    appointmentsList.forEach((appointment) => {
-      const status = appointment.status?.toLowerCase();
-      const appointmentType = appointment.type;
-
-      if (
-        status === "pending" ||
-        status === "confirmed" ||
-        status === "scheduled" ||
-        status === "requested" ||
-        status === "approved"
-      ) {
+    appointments.forEach((apt) => {
+      const status = apt.status?.toLowerCase();
+      if (upcomingStatuses.includes(status)) {
         stats.upcomingAppointments++;
+        if (status === "pending") stats.pendingResults++;
       }
-
-      if (status === "pending") {
-        if (
-          appointmentType === "clinic_lab_request" ||
-          appointment.source === "Clinic Lab Requests" ||
-          appointmentType === "consultation" ||
-          appointment.source === "appointments"
-        ) {
-          stats.pendingResults++;
-        }
-      }
-
-      if (
-        status === "completed" ||
-        status === "done" ||
-        status === "finished" ||
-        status === "results_ready"
-      ) {
+      if (completedStatuses.includes(status)) {
         stats.completedTests++;
       }
     });
 
-    // Process referrals (NEW)
-    referralsList.forEach((referral) => {
-      const status = referral.status?.toLowerCase();
-
-      console.log(`Processing referral ${referral.id}:`, {
-        status,
-        testName: referral.testName,
-        doctor: referral.doctor,
-        referringDoctor: referral.referringDoctor,
-      });
-
-      // Count active referrals
-      if (
-        status === "pending" ||
-        status === "confirmed" ||
-        status === "scheduled" ||
-        status === "approved" ||
-        status === "active"
-      ) {
+    referrals.forEach((ref) => {
+      const status = ref.status?.toLowerCase();
+      if ([...upcomingStatuses, "active"].includes(status)) {
         stats.activeReferrals++;
-        stats.upcomingAppointments++; // Also count as upcoming
-        console.log(
-          `Added to active referrals: ${referral.testName} (${status})`
-        );
+        stats.upcomingAppointments++;
       }
-
-      // Count completed referrals
-      if (
-        status === "completed" ||
-        status === "done" ||
-        status === "finished"
-      ) {
+      if (completedStatuses.includes(status)) {
         stats.completedReferrals++;
-        stats.completedTests++; // Also count as completed
-        console.log(
-          `Added to completed referrals: ${referral.testName} (${status})`
-        );
+        stats.completedTests++;
       }
     });
 
-    console.log("Final calculated stats:", stats);
+    transactions.forEach((tx) => {
+      const status = tx.status?.toLowerCase();
+
+      if (
+        status === "pending" ||
+        status === "processing" ||
+        status === "in_progress"
+      ) {
+        stats.pendingResults++;
+        stats.upcomingAppointments++;
+      }
+
+      if (completedStatuses.includes(status)) {
+        stats.completedTests++;
+      }
+    });
+
     setPatientData(stats);
   };
 
-  // Enhanced activity generation including referrals
-  const generateRecentActivity = (appointmentsList, referralsList) => {
-    // Combine appointments and referrals
-    const allActivities = [
-      ...appointmentsList.map((apt) => ({
-        ...apt,
-        activityType: "appointment",
-      })),
-      ...referralsList.map((ref) => ({ ...ref, activityType: "referral" })),
-    ];
-
-    const sortedActivities = allActivities
-      .sort((a, b) => {
-        const dateA = new Date(
-          a.createdAt?.date ||
-            a.createdAt ||
-            a.scheduledDateTime ||
-            a.lastUpdated ||
-            Date.now()
-        );
-        const dateB = new Date(
-          b.createdAt?.date ||
-            b.createdAt ||
-            b.scheduledDateTime ||
-            b.lastUpdated ||
-            Date.now()
-        );
-        return dateB - dateA;
-      })
-      .slice(0, 10); // Show more activities
-
-    const activities = sortedActivities.map((item) => {
-      let activityType = "appointment";
-      let message = "";
-
-      const status = item.status?.toLowerCase();
-      const testName = item.testName || "Service";
-      const doctor = item.doctor || "Staff";
-      const clinicName = item.clinicName || item.clinic || "";
-
-      // Generate activity message based on type and status
-      if (item.activityType === "referral") {
-        if (status === "pending" || status === "requested") {
-          activityType = "referral";
-          message = `Referral to ${doctor} for ${testName}${
-            clinicName ? ` at ${clinicName}` : ""
-          }`;
-        } else if (status === "completed") {
-          activityType = "result";
-          message = `Specialist consultation completed with ${doctor}`;
-        } else if (status === "confirmed" || status === "approved") {
-          activityType = "booking";
-          message = `Referral confirmed with ${doctor} for ${testName}`;
-        } else {
-          activityType = "referral";
-          message = `Referral ${status} - ${testName} with ${doctor}`;
-        }
-      } else if (item.type === "clinic_lab_request") {
-        if (status === "pending" || status === "requested") {
-          activityType = "appointment";
-          message = `${testName} lab test requested${
-            clinicName ? ` at ${clinicName}` : ""
-          }`;
-        } else if (status === "completed" || status === "results_ready") {
-          activityType = "result";
-          message = `${testName} lab results available${
-            clinicName ? ` from ${clinicName}` : ""
-          }`;
-        } else if (status === "processing" || status === "in_progress") {
-          activityType = "appointment";
-          message = `${testName} lab test being processed${
-            clinicName ? ` at ${clinicName}` : ""
-          }`;
-        } else {
-          activityType = "booking";
-          message = `${testName} lab request ${status}${
-            clinicName ? ` at ${clinicName}` : ""
-          }`;
-        }
-      } else {
-        // Regular consultation appointments
-        if (status === "pending" || status === "requested") {
-          activityType = "appointment";
-          message = `${testName} appointment pending with ${doctor}`;
-        } else if (status === "confirmed" || status === "approved") {
-          activityType = "booking";
-          message = `${testName} appointment confirmed with ${doctor}`;
-        } else if (status === "completed") {
-          activityType = "result";
-          message = `${testName} consultation completed with ${doctor}`;
-        } else {
-          activityType = "appointment";
-          message = `${testName} appointment ${status} with ${doctor}`;
-        }
-      }
-
-      // Format date and time
-      let displayDate = "Today";
-      let displayTime = "TBD";
-
-      if (item.scheduledDateTime) {
-        const scheduleDate = new Date(item.scheduledDateTime);
-        if (!isNaN(scheduleDate.getTime())) {
-          displayDate = scheduleDate.toLocaleDateString();
-          displayTime = scheduleDate.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-        }
-      } else if (item.appointmentDate && item.appointmentTime) {
-        displayDate = new Date(item.appointmentDate).toLocaleDateString();
-        displayTime = item.appointmentTime;
-      } else if (item.estimatedTime || item.appointmentTime) {
-        displayTime = item.estimatedTime || item.appointmentTime;
-      }
-
-      return {
-        id: item.id,
-        type: activityType,
-        message: message,
-        date: displayDate,
-        time: displayTime,
-        status: item.status,
-        testName: testName,
-        doctor: doctor,
-        source: item.source,
-        appointmentType: item.type,
-        activityType: item.activityType,
-        clinicName: clinicName,
-        serviceFee: item.serviceFee,
-      };
+  const generateActivity = (appointments, referrals, transactions) => {
+    console.log("Generating activity from:", {
+      appointments: appointments.length,
+      referrals: referrals.length,
+      transactions: transactions.length,
     });
 
-    setRecentActivity(activities);
+    const appointmentActivities = appointments.map((apt) => ({
+      ...apt,
+      activityType: "appointment",
+    }));
+    const referralActivities = referrals.map((ref) => ({
+      ...ref,
+      activityType: "referral",
+    }));
+    const transactionActivities = transactions.map((tx) => ({
+      ...tx,
+      activityType: "transaction",
+    }));
+
+    console.log(
+      "Referrals being added to activity:",
+      referrals.map((r) => ({
+        id: r.id,
+        status: r.status,
+        testName: r.testName,
+      }))
+    );
+    console.log(
+      "Transactions being added to activity:",
+      transactions.map((tx) => ({
+        id: tx.id,
+        status: tx.status,
+        testName: tx.testName,
+      }))
+    );
+
+    const sortedAppointments = appointmentActivities
+      .sort(
+        (a, b) => new Date(b.scheduledDateTime) - new Date(a.scheduledDateTime)
+      )
+      .slice(0, 8);
+
+    const sortedReferrals = referralActivities
+      .sort(
+        (a, b) => new Date(b.scheduledDateTime) - new Date(a.scheduledDateTime)
+      )
+      .slice(0, 2);
+
+    const sortedTransactions = transactionActivities
+      .sort(
+        (a, b) => new Date(b.scheduledDateTime) - new Date(a.scheduledDateTime)
+      )
+      .slice(0, 2);
+
+    const allItems = [
+      ...sortedAppointments,
+      ...sortedReferrals,
+      ...sortedTransactions,
+    ]
+      .sort(
+        (a, b) => new Date(b.scheduledDateTime) - new Date(a.scheduledDateTime)
+      )
+      .slice(0, 10);
+
+    console.log("Combined items for activity:", allItems.length);
+
+    const sortedActivities = allItems.map((item) => {
+      console.log(`Creating activity for item ${item.id}:`, {
+        type: item.type,
+        activityType: item.activityType,
+        status: item.status,
+      });
+      return createActivityItem(item);
+    });
+
+    console.log(
+      "Final activity items with details:",
+      sortedActivities.map((a) => ({
+        id: a.id,
+        activityType: a.activityType,
+        status: a.status,
+        type: a.type,
+        message: a.message.substring(0, 50) + "...",
+      }))
+    );
+    setRecentActivity(sortedActivities);
   };
 
-  const handleOptionChange = (option) => {
-    setSelectedOption(option);
-  };
+  const createActivityItem = (item) => {
+    const status = item.status?.toLowerCase();
+    const testName = item.testName || "Service";
+    const doctor = item.doctor || "Staff";
+    const clinicName = item.clinicName || "";
 
-  const getStatusColor = (status) => {
-    switch (status?.toLowerCase()) {
-      case "pending":
-      case "requested":
-        return "text-orange-600";
-      case "confirmed":
-      case "scheduled":
-      case "approved":
-        return "text-blue-600";
-      case "completed":
-      case "done":
-      case "results_ready":
-      case "finished":
-        return "text-green-600";
-      case "cancelled":
-      case "rejected":
-        return "text-red-600";
-      case "processing":
-      case "in_progress":
-        return "text-purple-600";
-      default:
-        return "text-gray-600";
+    const activityType = item.activityType;
+
+    let uiActivityType = "appointment";
+    let message = "";
+
+    if (activityType === "referral") {
+      uiActivityType =
+        status === "completed"
+          ? "result"
+          : ["confirmed", "approved"].includes(status)
+          ? "booking"
+          : "referral";
+      message =
+        status === "completed"
+          ? `Specialist consultation completed with ${doctor}`
+          : `Referral ${
+              status === "pending" ? "to" : status
+            } ${doctor} for ${testName}${
+              clinicName ? ` at ${clinicName}` : ""
+            }`;
+    } else if (item.type === "clinic_lab_request") {
+      uiActivityType = ["completed", "results_ready"].includes(status)
+        ? "result"
+        : "appointment";
+      message = `${testName} lab ${
+        status === "completed" || status === "results_ready"
+          ? "results available"
+          : `request ${status}`
+      }${
+        clinicName
+          ? ` ${
+              status === "completed" || status === "results_ready"
+                ? "from"
+                : "at"
+            } ${clinicName}`
+          : ""
+      }`;
+    } else if (activityType === "transaction") {
+      uiActivityType = ["completed", "results_ready"].includes(status)
+        ? "result"
+        : "appointment";
+
+      const schedTime =
+        item.labTestSched?.time || item.appointmentTime || "TBD";
+      const schedDate = item.labTestSched?.date || "TBD";
+
+      message = `${testName} ${
+        status === "completed" || status === "results_ready"
+          ? "results available"
+          : `scheduled for ${schedDate} at ${schedTime}`
+      }${clinicName ? ` at ${clinicName}` : ""}`;
+    } else {
+      uiActivityType =
+        status === "completed"
+          ? "result"
+          : ["confirmed", "approved"].includes(status)
+          ? "booking"
+          : "appointment";
+      message = `${testName} ${
+        status === "completed"
+          ? "consultation completed"
+          : `appointment ${status}`
+      } with ${doctor}`;
     }
+
+    const scheduleDate = new Date(item.scheduledDateTime);
+    const displayDate = !isNaN(scheduleDate.getTime())
+      ? scheduleDate.toLocaleDateString()
+      : item.labTestSched?.date || "Today";
+
+    const displayTime =
+      item.labTestSched?.time ||
+      item.appointmentTime ||
+      item.estimatedTime ||
+      (!isNaN(scheduleDate.getTime())
+        ? scheduleDate.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "TBD");
+
+    return {
+      id: item.id,
+      type: uiActivityType,
+      message,
+      date: displayDate,
+      time: displayTime,
+      status: item.status,
+      testName,
+      doctor,
+      source: item.source,
+      appointmentType: item.type,
+      activityType: activityType,
+      clinicName,
+      serviceFee: item.serviceFee,
+    };
+  };
+
+  const handleFilterClick = (filterType) => {
+    setActiveFilter(activeFilter === filterType ? "all" : filterType);
+  };
+  const getStatusColor = (status) => {
+    const statusColors = {
+      pending: "text-orange-600",
+      requested: "text-orange-600",
+      confirmed: "text-blue-600",
+      scheduled: "text-blue-600",
+      approved: "text-blue-600",
+      completed: "text-green-600",
+      done: "text-green-600",
+      results_ready: "text-green-600",
+      finished: "text-green-600",
+      cancelled: "text-red-600",
+      rejected: "text-red-600",
+      processing: "text-purple-600",
+      in_progress: "text-purple-600",
+      sample_collected: "text-blue-600",
+    };
+    return statusColors[status?.toLowerCase()] || "text-gray-600";
   };
 
   const getActivityIcon = (type) => {
-    switch (type) {
-      case "appointment":
-        return <Calendar className="w-4 h-4 text-blue-600" />;
-      case "result":
-        return <FileText className="w-4 h-4 text-green-600" />;
-      case "booking":
-        return <Clock className="w-4 h-4 text-orange-600" />;
-      case "referral":
-        return <UserCheck className="w-4 h-4 text-purple-600" />;
-      default:
-        return <Activity className="w-4 h-4 text-gray-600" />;
-    }
+    const icons = {
+      appointment: <Calendar className="w-4 h-4 text-blue-600" />,
+      result: <FileText className="w-4 h-4 text-green-600" />,
+      booking: <Clock className="w-4 h-4 text-orange-600" />,
+      referral: <UserCheck className="w-4 h-4 text-purple-600" />,
+      medical_transaction: <Stethoscope className="w-4 h-4 text-indigo-600" />,
+    };
+    return icons[type] || <Activity className="w-4 h-4 text-gray-600" />;
   };
 
   const getActivityBgColor = (type) => {
-    switch (type) {
-      case "appointment":
-        return "bg-blue-100";
-      case "result":
-        return "bg-green-100";
-      case "booking":
-        return "bg-orange-100";
-      case "referral":
-        return "bg-purple-100";
-      default:
-        return "bg-gray-100";
-    }
+    const bgColors = {
+      appointment: "bg-blue-100",
+      result: "bg-green-100",
+      booking: "bg-orange-100",
+      referral: "bg-purple-100",
+      medical_transaction: "bg-indigo-100",
+    };
+    return bgColors[type] || "bg-gray-100";
   };
 
   if (loading) {
@@ -886,7 +775,6 @@ function Dashboard() {
     <div className="flex min-h-screen">
       <Sidebar />
       <main className="flex-1 p-6 bg-gray-50 overflow-auto">
-        {/* Welcome Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">
             Welcome back, {user?.firstName || user?.name || "Patient"}!
@@ -894,106 +782,113 @@ function Dashboard() {
           <p className="text-gray-600">Here's your health dashboard overview</p>
         </div>
 
-        {/* Quick Stats Cards - Enhanced with Referrals */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
-          <div className="bg-white p-6 rounded-2xl shadow-lg border-l-4 border-blue-500 transition duration-300 hover:shadow-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-medium text-gray-600 mb-1">
-                  Upcoming Appointments
-                </h3>
-                <p className="text-2xl font-bold text-blue-600">
-                  {patientData.upcomingAppointments}
-                </p>
+          {[
+            {
+              label: "Upcoming Appointments",
+              value: patientData.upcomingAppointments,
+              color: "blue",
+              icon: Calendar,
+              filter: "upcoming",
+            },
+            {
+              label: "Pending",
+              value: patientData.pendingResults,
+              color: "orange",
+              icon: Clock,
+              filter: "pending",
+            },
+            {
+              label: "Completed",
+              value: patientData.completedTests,
+              color: "green",
+              icon: FileText,
+              filter: "completed",
+            },
+            {
+              label: "Active Referrals",
+              value: patientData.activeReferrals,
+              color: "purple",
+              icon: UserCheck,
+              filter: "referrals",
+            },
+            {
+              label: "Completed Referrals",
+              value: patientData.completedReferrals,
+              color: "indigo",
+              icon: Stethoscope,
+              filter: "referrals-completed",
+            },
+            {
+              label: "Total Visits",
+              value: patientData.totalVisits,
+              color: "gray",
+              icon: Activity,
+              filter: "all",
+            },
+          ].map((stat, index) => {
+            const Icon = stat.icon;
+            const isActive = activeFilter === stat.filter;
+            return (
+              <div
+                key={index}
+                onClick={() => handleFilterClick(stat.filter)}
+                className={`bg-white p-6 rounded-2xl shadow-lg border-l-4 transition duration-300 hover:shadow-xl cursor-pointer transform hover:scale-105 ${
+                  isActive
+                    ? `border-${stat.color}-600 bg-${stat.color}-50 ring-2 ring-${stat.color}-200`
+                    : `border-${stat.color}-500 hover:border-${stat.color}-600`
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3
+                      className={`text-sm font-medium mb-1 ${
+                        isActive ? `text-${stat.color}-700` : "text-gray-600"
+                      }`}
+                    >
+                      {stat.label}
+                    </h3>
+                    <p className={`text-2xl font-bold text-${stat.color}-600`}>
+                      {stat.value}
+                    </p>
+                    {isActive && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Click to clear filter
+                      </p>
+                    )}
+                  </div>
+                  <div
+                    className={`p-3 rounded-full ${
+                      isActive ? `bg-${stat.color}-200` : `bg-${stat.color}-100`
+                    }`}
+                  >
+                    <Icon className={`w-6 h-6 text-${stat.color}-600`} />
+                  </div>
+                </div>
               </div>
-              <div className="bg-blue-100 p-3 rounded-full">
-                <Calendar className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-lg border-l-4 border-orange-500 transition duration-300 hover:shadow-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-medium text-gray-600 mb-1">
-                  Pending
-                </h3>
-                <p className="text-2xl font-bold text-orange-600">
-                  {patientData.pendingResults}
-                </p>
-              </div>
-              <div className="bg-orange-100 p-3 rounded-full">
-                <Clock className="w-6 h-6 text-orange-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-lg border-l-4 border-green-500 transition duration-300 hover:shadow-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-medium text-gray-600 mb-1">
-                  Completed
-                </h3>
-                <p className="text-2xl font-bold text-green-600">
-                  {patientData.completedTests}
-                </p>
-              </div>
-              <div className="bg-green-100 p-3 rounded-full">
-                <FileText className="w-6 h-6 text-green-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-lg border-l-4 border-purple-500 transition duration-300 hover:shadow-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-medium text-gray-600 mb-1">
-                  Active Referrals
-                </h3>
-                <p className="text-2xl font-bold text-purple-600">
-                  {patientData.activeReferrals}
-                </p>
-              </div>
-              <div className="bg-purple-100 p-3 rounded-full">
-                <UserCheck className="w-6 h-6 text-purple-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-lg border-l-4 border-indigo-500 transition duration-300 hover:shadow-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-medium text-gray-600 mb-1">
-                  Completed Referrals
-                </h3>
-                <p className="text-2xl font-bold text-indigo-600">
-                  {patientData.completedReferrals}
-                </p>
-              </div>
-              <div className="bg-indigo-100 p-3 rounded-full">
-                <Stethoscope className="w-6 h-6 text-indigo-600" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-lg border-l-4 border-gray-500 transition duration-300 hover:shadow-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-medium text-gray-600 mb-1">
-                  Total Visits
-                </h3>
-                <p className="text-2xl font-bold text-gray-600">
-                  {patientData.totalVisits}
-                </p>
-              </div>
-              <div className="bg-gray-100 p-3 rounded-full">
-                <Activity className="w-6 h-6 text-gray-600" />
-              </div>
-            </div>
-          </div>
+            );
+          })}
         </div>
 
-        {/* Recent Activity Section */}
+        {activeFilter !== "all" && (
+          <div className="mb-4 flex items-center gap-2">
+            <span className="text-sm text-gray-600">Showing:</span>
+            <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">
+              {activeFilter === "upcoming" && "Upcoming Appointments"}
+              {activeFilter === "pending" && "Pending Items"}
+              {activeFilter === "completed" && "Completed Items"}
+              {activeFilter === "referrals" && "Active Referrals"}
+              {activeFilter === "referrals-completed" && "Completed Referrals"}
+            </span>
+            <button
+              onClick={() => setActiveFilter("all")}
+              className="text-xs text-gray-500 hover:text-gray-700 underline"
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
+
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
           <div className="flex items-center mb-6">
             <Bell className="w-6 h-6 text-gray-600 mr-3" />
@@ -1002,9 +897,9 @@ function Dashboard() {
             </h2>
           </div>
 
-          {recentActivity.length > 0 ? (
+          {filteredActivity.length > 0 ? (
             <div className="max-h-96 overflow-y-auto space-y-4 pr-2">
-              {recentActivity.map((activity, index) => (
+              {filteredActivity.map((activity, index) => (
                 <div
                   key={`${activity.source}-${activity.id}-${index}`}
                   className="flex items-start p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
@@ -1038,11 +933,15 @@ function Dashboard() {
                           className={`text-xs px-2 py-1 rounded flex-shrink-0 ${
                             activity.activityType === "referral"
                               ? "bg-purple-100 text-purple-700"
+                              : activity.activityType === "transaction"
+                              ? "bg-indigo-100 text-indigo-700"
                               : "bg-blue-100 text-blue-700"
                           }`}
                         >
                           {activity.activityType === "referral"
                             ? "Referral"
+                            : activity.activityType === "transaction"
+                            ? "Transaction"
                             : "Appointment"}
                         </span>
                       )}
@@ -1067,7 +966,6 @@ function Dashboard() {
           )}
         </div>
 
-        {/* Referrals Summary Section - NEW */}
         {allReferrals.length > 0 && (
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-8">
             <div className="flex items-center mb-6">
@@ -1136,7 +1034,10 @@ function Dashboard() {
 
             {allReferrals.length > 6 && (
               <div className="text-center mt-4">
-                <button className="text-purple-600 hover:text-purple-700 text-sm font-medium">
+                <button
+                  className="text-purple-600 hover:text-purple-700 text-sm font-medium"
+                  onClick={() => navigate("/PatientReferral")}
+                >
                   View All Referrals ({allReferrals.length})
                 </button>
               </div>

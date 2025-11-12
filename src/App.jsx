@@ -10,6 +10,7 @@ import ResetPassword from "./assets/components/ResetPassword";
 import ForgotPassword from "./assets/components/ForgotPassowrd";
 import PatientReferral from "./assets/components/PatientReferral";
 import PatientTeleconsultation from "./assets/components/PatientTeleconsultation";
+import PatientLaboratory from "./assets/components/PatientLaboratory";
 function App() {
   return (
     <Router>
@@ -63,6 +64,14 @@ function App() {
           element={
             <ProtectedRoute>
               <PatientTeleconsultation />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/PatientLaboratory"
+          element={
+            <ProtectedRoute>
+              <PatientLaboratory />
             </ProtectedRoute>
           }
         />

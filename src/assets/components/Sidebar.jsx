@@ -17,6 +17,7 @@ import {
   Bell,
   BarChart3,
   Video,
+  MessageSquare,
 } from "lucide-react";
 import { ref, get } from "firebase/database";
 import { database } from "../firebase/firebase";
@@ -82,9 +83,14 @@ function Sidebar() {
 
   const otherNavItems = [
     { to: "/", label: "Dashboard", icon: BarChart3 },
-    { to: "/FeedBack", label: "Feedback", icon: Users },
+    { to: "/FeedBack", label: "Feedback", icon: MessageSquare },
     { to: "/PatientReferral", label: "Track Referral Specialist", icon: Users },
-    // { to: "/PatientTeleconsultation", label: "Teleconsultation", icon: Video }, //
+    { to: "/PatientTeleconsultation", label: "Teleconsultation", icon: Video }, //
+    {
+      to: "/PatientLaboratory",
+      label: "Track Your Laboratory",
+      icon: FlaskConical,
+    }, //
   ];
 
   const isAppointmentActive = appointmentItems.some(
