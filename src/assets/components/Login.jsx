@@ -177,7 +177,7 @@ function Login() {
               <div className="flex justify-end space-x-4">
                 <button
                   type="button"
-                  onClick={() => (window.location.href = "/forgot-password")}
+                  onClick={() => navigate("/forgot-password")}
                   className="text-blue-300 hover:text-white text-sm font-medium transition-colors duration-200 hover:underline decoration-blue-300"
                 >
                   Forgot Password?
@@ -185,7 +185,7 @@ function Login() {
 
                 <button
                   type="button"
-                  onClick={() => (window.location.href = "/signup")}
+                  onClick={() => navigate("/signup")}
                   className="text-blue-300 hover:text-white text-sm font-medium transition-colors duration-200 hover:underline decoration-blue-300"
                 >
                   Sign Up
